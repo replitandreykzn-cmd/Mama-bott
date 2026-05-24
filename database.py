@@ -463,11 +463,12 @@ def get_reminders(user_id, active_only=True):
     return rows
 
 
-def get_due_reminders():
+def get_due_reminders(now_str: str = None):
     conn = get_conn()
     c = conn.cursor()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    c.execute(_q("SELECT * FROM reminders WHERE is_active=1 AND remind_at<=?"), (now,))
+    if now_str is None:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    c.execute(_q("SELECT * FROM reminders WHERE is_active=1 AND remind_at<=?"), (now_str,))
     rows = _fetchall(c)
     conn.close()
     return rows
