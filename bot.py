@@ -42,7 +42,7 @@ from handlers.subscription import (
     FAMILY_ADD_ID,
 )
 from handlers.pdf_export import export_pdf_select_child, export_pdf_for_child
-from handlers.admin import cmd_grant, cmd_revoke, cmd_stats, cmd_users, cmd_broadcast
+from handlers.admin import cmd_grant, cmd_revoke, cmd_stats, cmd_users, cmd_broadcast, check_premium_expiry
 from handlers.photo_diary import (
     show_photo_menu, show_child_photos_cb, start_add_photo,
     select_child_for_photo, got_photo, got_photo_caption,
@@ -189,7 +189,6 @@ async def check_reminders(app: Application):
 
 
 async def check_medications(app: Application):
-    """Проверяет лекарства и отправляет напоминания о приёме."""
     now = datetime.now()
     meds = db.get_all_active_medications()
     for m in meds:
@@ -198,14 +197,13 @@ async def check_medications(app: Application):
         except Exception:
             continue
 
-        # Проверяем, не истёк ли срок приёма
         if m["end_date"]:
             try:
                 end = datetime.strptime(m["end_date"], "%d.%m.%Y")
                 if now > end:
-                    import sqlite3
                     conn = db.get_conn()
-                    conn.execute("UPDATE medications SET is_active=0 WHERE id=?", (m["id"],))
+                    c = conn.cursor()
+                    c.execute(db._q("UPDATE medications SET is_active=0 WHERE id=?"), (m["id"],))
                     conn.commit()
                     conn.close()
                     continue
@@ -227,18 +225,21 @@ async def check_medications(app: Application):
 
 async def send_weekly_vaccine_reminders(app: Application):
     from datetime import date, timedelta
-    import sqlite3
 
-    conn = sqlite3.connect(db.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    users = conn.execute("SELECT DISTINCT user_id FROM children").fetchall()
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT user_id FROM children")
+    if db._is_pg():
+        users = [dict(zip([d[0] for d in c.description], row)) for row in c.fetchall()]
+    else:
+        users = c.fetchall()
     conn.close()
 
     today = date.today()
     in_14 = today + timedelta(days=14)
 
     for user_row in users:
-        user_id = user_row["user_id"]
+        user_id = user_row["user_id"] if isinstance(user_row, dict) else user_row[0]
         children = db.get_children(user_id)
         messages = []
 
@@ -448,6 +449,7 @@ def main():
         send_weekly_vaccine_reminders,
         "cron", day_of_week="mon", hour=9, minute=0, args=[app]
     )
+    scheduler.add_job(check_premium_expiry, "interval", hours=12, args=[app])
     scheduler.start()
 
     logger.info("МамаБот запущен!")
