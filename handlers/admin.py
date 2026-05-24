@@ -1,9 +1,10 @@
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
 import database as db
 
-OWNER_ID = 6903827237
+OWNER_ID = int(os.environ.get("OWNER_TG_ID", "0"))
 
 
 def owner_only(func):
@@ -200,7 +201,6 @@ async def check_premium_expiry(app):
     """Проверяет Premium пользователей и уведомляет об окончании за 3 дня."""
     users = db.get_all_users()
     now = datetime.now()
-    warn_date = now + timedelta(days=3)
 
     for r in users:
         if not r["is_premium"] or not r["premium_until"]:
@@ -210,7 +210,6 @@ async def check_premium_expiry(app):
         except Exception:
             continue
 
-        # Уведомляем если до конца осталось от 3 до 4 дней
         days_left = (until - now).days
         if 3 <= days_left <= 4:
             try:
@@ -230,7 +229,6 @@ async def check_premium_expiry(app):
             except Exception:
                 pass
 
-        # Уведомляем в день окончания
         elif days_left == 0:
             try:
                 keyboard = [[InlineKeyboardButton(
