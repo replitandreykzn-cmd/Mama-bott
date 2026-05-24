@@ -1,11 +1,12 @@
 [project]
-name = "repl-nix-workspace"
-version = "0.1.0"
-description = "Add your description here"
+name = "mama-bot"
+version = "1.0.0"
+description = "Telegram бот-помощник для мам"
 requires-python = ">=3.11"
 dependencies = [
     "apscheduler==3.10.4",
     "fpdf2>=2.8.7",
     "python-dateutil>=2.9.0.post0",
-    "python-telegram-bot==20.7",
+    "python-telegram-bot[job-queue]==21.3",
+    "psycopg2-binary>=2.9.0",
 ]
