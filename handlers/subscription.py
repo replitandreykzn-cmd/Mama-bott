@@ -1,11 +1,11 @@
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, filters
 from datetime import datetime, timedelta
 import database as db
 
-OWNER_TG_ID = 6903827237
-OWNER_USERNAME = "AND5F"
-PREMIUM_PRICE = "300 ₽/мес"
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "")
+PREMIUM_PRICE = os.environ.get("PREMIUM_PRICE", "300 ₽/мес")
 TRIAL_DAYS = 14
 
 FAMILY_ADD_ID = range(30, 31)
@@ -68,7 +68,7 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
             "• Все прививки и напоминания\n"
             "• PDF-экспорт карты ребёнка\n"
             "• Семейный доступ (до 5 чел.)\n"
-            "• Фотодневник, лекарства, журнал болезней\n"
+            "• Лекарства, журнал болезней\n"
             "• Еженедельные напоминания о прививках\n\n"
             "💳 Для оплаты нажмите кнопку ниже:"
         )
