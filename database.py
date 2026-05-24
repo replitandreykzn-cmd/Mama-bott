@@ -1,7 +1,11 @@
 import os
 import psycopg2
 import psycopg2.extras
+import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+_TZ = ZoneInfo(os.environ.get("BOT_TIMEZONE", "Europe/Moscow"))
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_PATH = os.path.join(os.path.dirname(__file__), "mama_bot.db")
@@ -522,7 +526,7 @@ def delete_photo(photo_id, user_id):
 # ── Лекарства ────────────────────────────────────────────────────────────────
 
 def add_medication(user_id, child_id, name, dose, interval_hours, end_date=None):
-    next_at = (datetime.now() + timedelta(hours=interval_hours)).isoformat()
+    next_at = (datetime.now(_TZ) + timedelta(hours=interval_hours)).isoformat()
     conn = get_conn()
     c = conn.cursor()
     if _is_pg():
@@ -562,7 +566,7 @@ def get_all_active_medications():
 
 
 def update_medication_next_reminder(med_id, interval_hours):
-    next_at = (datetime.now() + timedelta(hours=interval_hours)).isoformat()
+    next_at = (datetime.now(_TZ) + timedelta(hours=interval_hours)).isoformat()
     conn = get_conn()
     c = conn.cursor()
     c.execute(_q("UPDATE medications SET next_reminder_at=? WHERE id=?"), (next_at, med_id))
