@@ -38,7 +38,7 @@ def _ensure_font():
 
 
 def _rr(pdf, x, y, w, h, r=3, fill_color=None, border_color=None, border=False):
-    """Скруглённый прямоугольник."""
+    """Прямоугольник с заливкой."""
     if fill_color:
         pdf.set_fill_color(*fill_color)
     if border_color:
@@ -47,7 +47,7 @@ def _rr(pdf, x, y, w, h, r=3, fill_color=None, border_color=None, border=False):
         pdf.set_draw_color(*C_BORDER)
     pdf.set_line_width(0.3)
     style = "FD" if border else "F"
-    pdf.round_corner_rect(x, y, w, h, r, round_corners="ALL", style=style)
+    pdf.rect(x, y, w, h, style)
 
 
 def _section(pdf, title, icon, accent):
