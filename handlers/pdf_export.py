@@ -12,27 +12,24 @@ from handlers.child import age_str
 FONT_DIR = os.path.join(os.path.dirname(__file__), "..", "fonts")
 FONT_PATH = os.path.join(FONT_DIR, "DejaVuSans.ttf")
 
-# Цветовая палитра
-C_PINK       = (220, 80, 120)
-C_PINK_LIGHT = (255, 235, 245)
-C_PINK_MID   = (255, 210, 230)
-C_BLUE       = (70, 130, 200)
-C_BLUE_LIGHT = (235, 245, 255)
-C_BLUE_MID   = (210, 230, 255)
-C_GREEN      = (60, 160, 80)
-C_GREEN_LIGHT= (235, 255, 240)
-C_GREEN_MID  = (200, 240, 210)
-C_ORANGE     = (200, 100, 20)
-C_ORANGE_LIGHT=(255, 248, 235)
-C_ORANGE_MID = (255, 225, 180)
-C_PURPLE     = (120, 80, 200)
-C_PURPLE_LIGHT=(245, 240, 255)
-C_PURPLE_MID = (220, 210, 255)
-C_GRAY_DARK  = (60, 60, 60)
-C_GRAY_MID   = (120, 120, 120)
-C_GRAY_LIGHT = (245, 245, 245)
-C_WHITE      = (255, 255, 255)
-C_RED        = (200, 50, 50)
+# ── Цвета ─────────────────────────────────────────────────────────────────────
+C_ACCENT       = (99, 102, 241)
+C_ACCENT_LIGHT = (238, 242, 255)
+C_ACCENT_MID   = (199, 210, 254)
+C_GREEN        = (34, 197, 94)
+C_GREEN_LIGHT  = (240, 253, 244)
+C_AMBER        = (245, 158, 11)
+C_AMBER_LIGHT  = (255, 251, 235)
+C_AMBER_MID    = (253, 230, 138)
+C_RED          = (239, 68, 68)
+C_RED_LIGHT    = (254, 242, 242)
+C_PINK         = (236, 72, 153)
+C_PINK_LIGHT   = (253, 242, 248)
+C_DARK         = (17, 24, 39)
+C_MID          = (107, 114, 128)
+C_LIGHT        = (249, 250, 251)
+C_BORDER       = (229, 231, 235)
+C_WHITE        = (255, 255, 255)
 
 
 def _ensure_font():
@@ -40,172 +37,156 @@ def _ensure_font():
         raise FileNotFoundError(f"Шрифт не найден: {FONT_PATH}")
 
 
-def _set_color(pdf, color, fill=False):
-    if fill:
-        pdf.set_fill_color(*color)
+def _rr(pdf, x, y, w, h, r=3, fill_color=None, border_color=None, border=False):
+    """Скруглённый прямоугольник."""
+    if fill_color:
+        pdf.set_fill_color(*fill_color)
+    if border_color:
+        pdf.set_draw_color(*border_color)
     else:
-        pdf.set_text_color(*color)
-
-
-def _section_header(pdf, title, icon, bg, text_color):
-    pdf.ln(4)
-    pdf.set_fill_color(*bg)
-    pdf.set_draw_color(*text_color)
-    pdf.set_line_width(0.5)
-    pdf.rect(10, pdf.get_y(), 190, 11, "FD")
-    pdf.set_font("DejaVu", "B", 12)
-    pdf.set_text_color(*text_color)
-    pdf.cell(0, 11, f"  {icon}  {title}", ln=True)
-    pdf.set_draw_color(200, 200, 200)
-    pdf.set_line_width(0.2)
-    pdf.ln(3)
-
-
-def _divider(pdf, color=None):
-    color = color or C_GRAY_MID
-    pdf.set_draw_color(*color)
+        pdf.set_draw_color(*C_BORDER)
     pdf.set_line_width(0.3)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    style = "FD" if border else "F"
+    pdf.round_corner_rect(x, y, w, h, r, round_corners="ALL", style=style)
+
+
+def _section(pdf, title, icon, accent):
+    """Современный заголовок секции."""
+    pdf.ln(6)
+    y = pdf.get_y()
+    # Цветная полоска слева
+    pdf.set_fill_color(*accent)
+    pdf.rect(10, y, 3, 9, "F")
+    # Светлый фон
+    r, g, b = accent
+    light_bg = (
+        r + int((255 - r) * 0.90),
+        g + int((255 - g) * 0.90),
+        b + int((255 - b) * 0.90),
+    )
+    _rr(pdf, 13, y, 187, 9, r=2, fill_color=light_bg)
+    pdf.set_xy(18, y + 1)
+    pdf.set_font("DejaVu", "B", 10)
+    pdf.set_text_color(*accent)
+    pdf.cell(0, 7, f"{icon}  {title}", ln=True)
     pdf.ln(3)
 
 
-def _info_row(pdf, label, value, label_color=None, value_color=None):
-    label_color = label_color or C_GRAY_MID
-    value_color = value_color or C_GRAY_DARK
-    pdf.set_font("DejaVu", "B", 10)
-    pdf.set_text_color(*label_color)
-    pdf.cell(52, 7, label)
-    pdf.set_font("DejaVu", "", 10)
-    pdf.set_text_color(*value_color)
-    pdf.cell(0, 7, value, ln=True)
+def _kv(pdf, label, value, lw=42):
+    pdf.set_font("DejaVu", "", 9)
+    pdf.set_text_color(*C_MID)
+    pdf.cell(lw, 6, label)
+    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_text_color(*C_DARK)
+    pdf.cell(0, 6, value, ln=True)
 
 
-def generate_child_pdf(child, growth_records, vaccinations, illnesses=None, medications=None) -> bytes:
+def generate_child_pdf(child, growth_records, vaccinations,
+                       illnesses=None, medications=None) -> bytes:
     _ensure_font()
 
     pdf = FPDF()
-    pdf.add_font("DejaVu", "", FONT_PATH)
+    pdf.add_font("DejaVu", "",  FONT_PATH)
     pdf.add_font("DejaVu", "B", FONT_PATH)
-    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_margins(10, 10, 10)
 
-    gender_str = "Девочка" if child["gender"] == "girl" else "Мальчик"
+    gender_str  = "Девочка" if child["gender"] == "girl" else "Мальчик"
     gender_icon = "♀" if child["gender"] == "girl" else "♂"
-    age = age_str(child["birthdate"])
+    age         = age_str(child["birthdate"])
+    today_str   = date.today().strftime("%d.%m.%Y")
 
     # ── ШАПКА ────────────────────────────────────────────────────────────────
-    # Розовый фон
+    pdf.set_fill_color(*C_ACCENT)
+    pdf.rect(0, 0, 105, 30, "F")
     pdf.set_fill_color(*C_PINK)
-    pdf.rect(0, 0, 210, 38, "F")
+    pdf.rect(105, 0, 105, 30, "F")
+    # затемнение
+    pdf.set_fill_color(0, 0, 0)
+    pdf.set_alpha(0.18)
+    pdf.rect(0, 0, 210, 30, "F")
+    pdf.set_alpha(1.0)
 
-    # Декоративная полоска снизу шапки
-    pdf.set_fill_color(180, 50, 90)
-    pdf.rect(0, 35, 210, 3, "F")
-
-    pdf.set_font("DejaVu", "B", 20)
+    pdf.set_font("DejaVu", "B", 18)
     pdf.set_text_color(*C_WHITE)
-    pdf.cell(0, 12, "", ln=True)
-    pdf.cell(0, 12, "МамаБот", align="C", ln=True)
-    pdf.set_font("DejaVu", "", 10)
-    pdf.set_text_color(255, 220, 235)
-    pdf.cell(0, 7, "Медицинский отчёт для педиатра", align="C", ln=True)
-    pdf.ln(8)
+    pdf.set_xy(0, 6)
+    pdf.cell(210, 10, "МамаБот", align="C", ln=True)
+    pdf.set_font("DejaVu", "", 8)
+    pdf.set_text_color(225, 225, 255)
+    pdf.cell(210, 6, "Медицинский отчёт для педиатра", align="C", ln=True)
+    pdf.ln(5)
 
     # ── КАРТОЧКА РЕБЁНКА ─────────────────────────────────────────────────────
-    # Белая карточка с тенью
-    pdf.set_fill_color(*C_PINK_LIGHT)
-    pdf.set_draw_color(*C_PINK)
-    pdf.set_line_width(0.8)
-    y_card = pdf.get_y()
-    pdf.rect(10, y_card, 190, 42, "FD")
+    y0 = pdf.get_y()
+    _rr(pdf, 10, y0, 190, 36, r=4, fill_color=C_WHITE,
+        border_color=C_BORDER, border=True)
+    pdf.set_fill_color(*C_ACCENT)
+    pdf.rect(10, y0, 4, 36, "F")
 
-    # Цветная полоска слева
-    pdf.set_fill_color(*C_PINK)
-    pdf.rect(10, y_card, 4, 42, "F")
-
-    pdf.set_xy(18, y_card + 5)
-    pdf.set_font("DejaVu", "B", 16)
-    pdf.set_text_color(*C_PINK)
-    pdf.cell(0, 10, f"{gender_icon}  {child['name']}", ln=True)
+    pdf.set_xy(18, y0 + 5)
+    pdf.set_font("DejaVu", "B", 15)
+    pdf.set_text_color(*C_ACCENT)
+    pdf.cell(110, 9, f"{gender_icon}  {child['name']}")
+    pdf.set_font("DejaVu", "", 7.5)
+    pdf.set_text_color(*C_MID)
+    pdf.cell(0, 9, f"Создан: {today_str}", align="R", ln=True)
 
     pdf.set_x(18)
-    pdf.set_font("DejaVu", "", 10)
-    pdf.set_text_color(*C_GRAY_MID)
-    pdf.cell(60, 7, "Дата рождения:")
-    pdf.set_text_color(*C_GRAY_DARK)
-    pdf.set_font("DejaVu", "B", 10)
-    pdf.cell(0, 7, child["birthdate"], ln=True)
-
+    _kv(pdf, "Дата рождения:", child["birthdate"])
     pdf.set_x(18)
-    pdf.set_font("DejaVu", "", 10)
-    pdf.set_text_color(*C_GRAY_MID)
-    pdf.cell(60, 7, "Возраст:")
-    pdf.set_text_color(*C_PINK)
-    pdf.set_font("DejaVu", "B", 10)
-    pdf.cell(0, 7, age, ln=True)
-
+    _kv(pdf, "Возраст:", age)
     pdf.set_x(18)
-    pdf.set_font("DejaVu", "", 10)
-    pdf.set_text_color(*C_GRAY_MID)
-    pdf.cell(60, 7, "Пол:")
-    pdf.set_text_color(*C_GRAY_DARK)
-    pdf.set_font("DejaVu", "", 10)
-    pdf.cell(0, 7, gender_str, ln=True)
-
-    # Дата создания справа
-    pdf.set_xy(140, y_card + 5)
-    pdf.set_font("DejaVu", "", 8)
-    pdf.set_text_color(*C_GRAY_MID)
-    pdf.cell(55, 6, f"Создан: {date.today().strftime('%d.%m.%Y')}", align="R", ln=True)
-
-    pdf.set_y(y_card + 46)
+    _kv(pdf, "Пол:", gender_str)
+    pdf.set_y(y0 + 40)
 
     # ── РОСТ И ВЕС ───────────────────────────────────────────────────────────
-    _section_header(pdf, "Рост и вес", "◉", C_BLUE_MID, C_BLUE)
+    _section(pdf, "Рост и вес", "◉", C_ACCENT)
 
     if growth_records:
-        # Заголовок таблицы
-        pdf.set_fill_color(*C_BLUE)
+        y = pdf.get_y()
+        _rr(pdf, 10, y, 190, 8, r=2, fill_color=C_ACCENT)
+        pdf.set_xy(12, y + 1)
+        pdf.set_font("DejaVu", "B", 9)
         pdf.set_text_color(*C_WHITE)
-        pdf.set_font("DejaVu", "B", 10)
-        pdf.cell(60, 8, "  Дата", fill=True)
-        pdf.cell(60, 8, "Рост (см)", fill=True, align="C")
-        pdf.cell(60, 8, "Вес (кг)", fill=True, align="C", ln=True)
+        pdf.cell(60, 6, "Дата")
+        pdf.cell(60, 6, "Рост (см)", align="C")
+        pdf.cell(60, 6, "Вес (кг)",  align="C", ln=True)
 
         for i, r in enumerate(growth_records):
-            if i % 2 == 0:
-                pdf.set_fill_color(*C_BLUE_LIGHT)
-            else:
-                pdf.set_fill_color(*C_WHITE)
-            pdf.set_text_color(*C_GRAY_DARK)
-            pdf.set_font("DejaVu", "", 10)
-            pdf.cell(60, 7, f"  {r['date']}", fill=True)
+            y = pdf.get_y()
+            bg = C_ACCENT_LIGHT if i % 2 == 0 else C_WHITE
+            _rr(pdf, 10, y, 190, 7, r=0, fill_color=bg)
             h = str(r["height_cm"]) if r["height_cm"] else "—"
             w = str(r["weight_kg"]) if r["weight_kg"] else "—"
-            pdf.set_font("DejaVu", "B", 10)
-            pdf.set_text_color(*C_BLUE)
-            pdf.cell(60, 7, h, fill=True, align="C")
-            pdf.cell(60, 7, w, fill=True, align="C", ln=True)
+            pdf.set_xy(12, y + 0.5)
+            pdf.set_font("DejaVu", "", 9)
+            pdf.set_text_color(*C_DARK)
+            pdf.cell(60, 6, r["date"])
+            pdf.set_font("DejaVu", "B", 9)
+            pdf.set_text_color(*C_ACCENT)
+            pdf.cell(60, 6, h, align="C")
+            pdf.cell(60, 6, w, align="C", ln=True)
 
-        # Итог — последний замер
         last = growth_records[0]
-        pdf.set_fill_color(*C_BLUE_MID)
-        pdf.set_text_color(*C_BLUE)
-        pdf.set_font("DejaVu", "B", 9)
-        h_last = f"{last['height_cm']} см" if last["height_cm"] else "—"
-        w_last = f"{last['weight_kg']} кг" if last["weight_kg"] else "—"
-        pdf.cell(0, 7, f"  Последний замер: {last['date']}  —  рост {h_last}, вес {w_last}", fill=True, ln=True)
+        y = pdf.get_y() + 2
+        _rr(pdf, 10, y, 190, 7, r=2, fill_color=C_ACCENT_MID)
+        h_s = f"{last['height_cm']} см" if last["height_cm"] else "—"
+        w_s = f"{last['weight_kg']} кг" if last["weight_kg"] else "—"
+        pdf.set_xy(12, y + 1)
+        pdf.set_font("DejaVu", "B", 8.5)
+        pdf.set_text_color(*C_ACCENT)
+        pdf.cell(0, 5, f"Последний замер: {last['date']}  ·  {h_s}  ·  {w_s}", ln=True)
     else:
-        pdf.set_font("DejaVu", "", 10)
-        pdf.set_text_color(*C_GRAY_MID)
-        pdf.cell(0, 8, "  Записи отсутствуют", ln=True)
+        pdf.set_font("DejaVu", "", 9)
+        pdf.set_text_color(*C_MID)
+        pdf.cell(0, 7, "  Записей пока нет", ln=True)
 
     # ── ПРИВИВКИ ─────────────────────────────────────────────────────────────
-    _section_header(pdf, "Прививки", "✦", C_GREEN_MID, C_GREEN)
+    _section(pdf, "Прививки", "✦", C_GREEN)
 
     if vaccinations:
-        done = [v for v in vaccinations if v["done_date"]]
+        done    = [v for v in vaccinations if v["done_date"]]
         pending = [v for v in vaccinations if not v["done_date"]]
         overdue = []
         for v in pending:
@@ -216,155 +197,185 @@ def generate_child_pdf(child, growth_records, vaccinations, illnesses=None, medi
                 except Exception:
                     pass
 
-        # Статистика прививок — три блока
-        pdf.set_fill_color(*C_GREEN_MID)
-        pdf.set_text_color(*C_GREEN)
-        pdf.set_font("DejaVu", "B", 10)
-        w3 = 62
-        pdf.cell(w3, 9, f"  Сделано: {len(done)}", fill=True, align="L")
-        pdf.set_fill_color(*C_ORANGE_MID)
-        pdf.set_text_color(*C_ORANGE)
-        pdf.cell(w3, 9, f"Просрочено: {len(overdue)}", fill=True, align="C")
-        pdf.set_fill_color(*C_BLUE_MID)
-        pdf.set_text_color(*C_BLUE)
-        pdf.cell(w3+4, 9, f"Предстоит: {len(pending)-len(overdue)}", fill=True, align="C", ln=True)
-        pdf.ln(2)
+        # Три карточки статистики
+        y = pdf.get_y()
+        stats = [
+            (f"Сделано: {len(done)}",                    C_GREEN_LIGHT,  C_GREEN),
+            (f"Просрочено: {len(overdue)}",               C_AMBER_LIGHT,  C_AMBER),
+            (f"Предстоит: {len(pending)-len(overdue)}",  C_ACCENT_LIGHT, C_ACCENT),
+        ]
+        cw = 62
+        for i, (txt, bg, fg) in enumerate(stats):
+            cx = 10 + i * (cw + 2)
+            _rr(pdf, cx, y, cw, 10, r=3, fill_color=bg,
+                border_color=fg, border=True)
+            pdf.set_xy(cx, y + 2)
+            pdf.set_font("DejaVu", "B", 9)
+            pdf.set_text_color(*fg)
+            pdf.cell(cw, 6, txt, align="C")
+        pdf.ln(14)
 
-        # Таблица
-        pdf.set_fill_color(*C_GREEN)
+        y = pdf.get_y()
+        _rr(pdf, 10, y, 190, 8, r=2, fill_color=C_GREEN)
+        pdf.set_xy(12, y + 1)
+        pdf.set_font("DejaVu", "B", 8.5)
         pdf.set_text_color(*C_WHITE)
-        pdf.set_font("DejaVu", "B", 9)
-        pdf.cell(100, 8, "  Прививка", fill=True)
-        pdf.cell(40, 8, "Статус", fill=True, align="C")
-        pdf.cell(50, 8, "Дата / план", fill=True, align="C", ln=True)
+        pdf.cell(100, 6, "Прививка")
+        pdf.cell(45,  6, "Статус",     align="C")
+        pdf.cell(43,  6, "Дата / план", align="C", ln=True)
 
-        pdf.set_font("DejaVu", "", 9)
         for i, v in enumerate(vaccinations):
+            y = pdf.get_y()
             bg = C_GREEN_LIGHT if i % 2 == 0 else C_WHITE
-            pdf.set_fill_color(*bg)
+            _rr(pdf, 10, y, 190, 6, r=0, fill_color=bg)
+            pdf.set_xy(12, y + 0.5)
+
+            name_text = v["vaccine_name"]
+            if len(name_text) > 54:
+                name_text = name_text[:52] + ".."
 
             if v["done_date"]:
-                status = "✓ Сделано"
-                status_color = C_GREEN
-                date_val = v["done_date"]
+                status, sc, dv = "✓ Сделано", C_GREEN, v["done_date"]
             else:
                 try:
                     d = datetime.strptime(v["scheduled_date"], "%d.%m.%Y").date()
-                    if d <= date.today():
-                        status = "! Просрочено"
-                        status_color = C_RED
-                    else:
-                        status = "→ Предстоит"
-                        status_color = C_BLUE
+                    status, sc = ("! Просрочено", C_RED) if d <= date.today() else ("→ Предстоит", C_ACCENT)
                 except Exception:
-                    status = "→ Предстоит"
-                    status_color = C_BLUE
-                date_val = v["scheduled_date"] or "—"
+                    status, sc = "→ Предстоит", C_ACCENT
+                dv = v["scheduled_date"] or "—"
 
-            name_text = v["vaccine_name"]
-            if len(name_text) > 52:
-                name_text = name_text[:50] + ".."
-
-            pdf.set_text_color(*C_GRAY_DARK)
-            pdf.cell(100, 6, f"  {name_text}", fill=True)
-            pdf.set_text_color(*status_color)
-            pdf.set_font("DejaVu", "B", 9)
-            pdf.cell(40, 6, status, fill=True, align="C")
-            pdf.set_text_color(*C_GRAY_DARK)
-            pdf.set_font("DejaVu", "", 9)
-            pdf.cell(50, 6, date_val, fill=True, align="C", ln=True)
+            pdf.set_font("DejaVu", "", 8.5)
+            pdf.set_text_color(*C_DARK)
+            pdf.cell(100, 5, f"  {name_text}")
+            pdf.set_font("DejaVu", "B", 8.5)
+            pdf.set_text_color(*sc)
+            pdf.cell(45, 5, status, align="C")
+            pdf.set_font("DejaVu", "", 8.5)
+            pdf.set_text_color(*C_MID)
+            pdf.cell(43, 5, dv, align="C", ln=True)
     else:
-        pdf.set_font("DejaVu", "", 10)
-        pdf.set_text_color(*C_GRAY_MID)
-        pdf.cell(0, 8, "  Прививки не добавлены", ln=True)
+        pdf.set_font("DejaVu", "", 9)
+        pdf.set_text_color(*C_MID)
+        pdf.cell(0, 7, "  Прививки не добавлены", ln=True)
 
     # ── ИСТОРИЯ БОЛЕЗНЕЙ ─────────────────────────────────────────────────────
-    _section_header(pdf, "История болезней", "♥", C_ORANGE_MID, C_ORANGE)
+    _section(pdf, "История болезней", "♥", C_AMBER)
 
     if illnesses:
         for ill in illnesses:
-            end = ill["end_date"] or "не закрыта"
+            end_str   = ill["end_date"] or "не закрыта"
             is_active = not ill["end_date"]
 
-            # Заголовок болезни
-            bg = C_ORANGE_MID if is_active else C_ORANGE_LIGHT
-            pdf.set_fill_color(*bg)
-            pdf.set_text_color(*C_ORANGE)
-            pdf.set_font("DejaVu", "B", 10)
-            status_mark = " ● АКТИВНО" if is_active else ""
-            pdf.cell(0, 8, f"  {ill['illness_name']}   ({ill['start_date']} — {end}){status_mark}", fill=True, ln=True)
+            y = pdf.get_y()
+            _rr(pdf, 10, y, 190, 8, r=3, fill_color=C_AMBER_LIGHT,
+                border_color=C_AMBER, border=True)
+            pdf.set_xy(14, y + 1.5)
+            pdf.set_font("DejaVu", "B", 9)
+            pdf.set_text_color(*C_DARK)
+            pdf.cell(130, 5, ill["illness_name"])
+            pdf.set_font("DejaVu", "", 8)
+            pdf.set_text_color(*C_MID)
+            pdf.cell(0, 5, f"{ill['start_date']} — {end_str}", align="R")
+            pdf.ln(9)
+
+            if is_active:
+                y2 = pdf.get_y() - 3
+                _rr(pdf, 14, y2, 24, 6, r=2, fill_color=C_AMBER_MID)
+                pdf.set_xy(14, y2 + 0.8)
+                pdf.set_font("DejaVu", "B", 7.5)
+                pdf.set_text_color(*C_AMBER)
+                pdf.cell(24, 5, "● АКТИВНО", align="C", ln=True)
+                pdf.ln(2)
 
             entries = db.get_illness_entries(ill["id"])
             if entries:
-                pdf.set_fill_color(*C_ORANGE)
+                y = pdf.get_y()
+                _rr(pdf, 14, y, 184, 6, r=1, fill_color=C_AMBER)
+                pdf.set_xy(16, y + 0.5)
+                pdf.set_font("DejaVu", "B", 7.5)
                 pdf.set_text_color(*C_WHITE)
-                pdf.set_font("DejaVu", "B", 8)
-                pdf.cell(32, 6, "  Дата", fill=True)
-                pdf.cell(22, 6, "Темп.", fill=True, align="C")
-                pdf.cell(68, 6, "Симптомы", fill=True, align="C")
-                pdf.cell(68, 6, "Лекарства", fill=True, align="C", ln=True)
+                pdf.cell(30, 5, "Дата")
+                pdf.cell(20, 5, "Темп.", align="C")
+                pdf.cell(70, 5, "Симптомы")
+                pdf.cell(64, 5, "Лекарства", ln=True)
 
-                for i, e in enumerate(entries):
-                    bg2 = C_ORANGE_LIGHT if i % 2 == 0 else C_WHITE
-                    pdf.set_fill_color(*bg2)
-                    pdf.set_text_color(*C_GRAY_DARK)
-                    pdf.set_font("DejaVu", "", 8)
+                for j, e in enumerate(entries):
+                    y = pdf.get_y()
+                    bg2 = C_AMBER_LIGHT if j % 2 == 0 else C_WHITE
+                    _rr(pdf, 14, y, 184, 6, r=0, fill_color=bg2)
+                    pdf.set_xy(16, y + 0.5)
                     temp = f"{e['temperature']}°" if e["temperature"] else "—"
-                    symp = (e["symptoms"] or "—")[:35]
-                    meds = (e["medications_given"] or "—")[:38]
-                    pdf.cell(32, 6, f"  {e['entry_date']}", fill=True)
-                    pdf.set_text_color(*C_RED if e["temperature"] and float(e["temperature"]) >= 38 else C_GRAY_DARK)
-                    pdf.cell(22, 6, temp, fill=True, align="C")
-                    pdf.set_text_color(*C_GRAY_DARK)
-                    pdf.cell(68, 6, symp, fill=True)
-                    pdf.cell(68, 6, meds, fill=True, ln=True)
-            pdf.ln(3)
+                    symp = (e["symptoms"] or "—")[:38]
+                    meds_g = (e["medications_given"] or "—")[:36]
+                    hi = e["temperature"] and float(e["temperature"]) >= 38
+                    pdf.set_font("DejaVu", "", 7.5)
+                    pdf.set_text_color(*C_DARK)
+                    pdf.cell(30, 5, e["entry_date"])
+                    pdf.set_text_color(*(C_RED if hi else C_DARK))
+                    pdf.set_font("DejaVu", "B" if hi else "", 7.5)
+                    pdf.cell(20, 5, temp, align="C")
+                    pdf.set_font("DejaVu", "", 7.5)
+                    pdf.set_text_color(*C_DARK)
+                    pdf.cell(70, 5, symp)
+                    pdf.set_text_color(*C_MID)
+                    pdf.cell(64, 5, meds_g, ln=True)
+            pdf.ln(4)
     else:
-        pdf.set_font("DejaVu", "", 10)
-        pdf.set_text_color(*C_GRAY_MID)
-        pdf.cell(0, 8, "  Болезни не записаны", ln=True)
+        pdf.set_font("DejaVu", "", 9)
+        pdf.set_text_color(*C_MID)
+        pdf.cell(0, 7, "  Болезней не записано", ln=True)
 
     # ── ЛЕКАРСТВА ────────────────────────────────────────────────────────────
-    _section_header(pdf, "Лекарства", "✚", C_PURPLE_MID, C_PURPLE)
+    _section(pdf, "Лекарства", "✚", C_PINK)
 
     if medications:
-        pdf.set_fill_color(*C_PURPLE)
+        y = pdf.get_y()
+        _rr(pdf, 10, y, 190, 8, r=2, fill_color=C_PINK)
+        pdf.set_xy(12, y + 1)
+        pdf.set_font("DejaVu", "B", 8.5)
         pdf.set_text_color(*C_WHITE)
-        pdf.set_font("DejaVu", "B", 9)
-        pdf.cell(60, 8, "  Название", fill=True)
-        pdf.cell(38, 8, "Доза", fill=True, align="C")
-        pdf.cell(38, 8, "Интервал", fill=True, align="C")
-        pdf.cell(54, 8, "До даты", fill=True, align="C", ln=True)
+        pdf.cell(65, 6, "Название")
+        pdf.cell(40, 6, "Доза",     align="C")
+        pdf.cell(45, 6, "Интервал", align="C")
+        pdf.cell(38, 6, "До даты",  align="C", ln=True)
 
         for i, m in enumerate(medications):
-            bg = C_PURPLE_LIGHT if i % 2 == 0 else C_WHITE
-            pdf.set_fill_color(*bg)
-            pdf.set_text_color(*C_GRAY_DARK)
-            pdf.set_font("DejaVu", "", 9)
-            interval = f"каждые {m['interval_hours']}ч"
-            pdf.cell(60, 7, f"  {(m['name'] or '')[:30]}", fill=True)
-            pdf.set_text_color(*C_PURPLE)
-            pdf.set_font("DejaVu", "B", 9)
-            pdf.cell(38, 7, (m["dose"] or "—")[:18], fill=True, align="C")
-            pdf.set_text_color(*C_GRAY_DARK)
-            pdf.set_font("DejaVu", "", 9)
-            pdf.cell(38, 7, interval, fill=True, align="C")
-            pdf.cell(54, 7, m["end_date"] or "—", fill=True, align="C", ln=True)
+            y = pdf.get_y()
+            bg = C_PINK_LIGHT if i % 2 == 0 else C_WHITE
+            _rr(pdf, 10, y, 190, 7, r=0, fill_color=bg)
+            pdf.set_xy(12, y + 1)
+            ih = int(m["interval_hours"])
+            im = int((m["interval_hours"] - ih) * 60)
+            ivl = f"каждые {ih} ч." if im == 0 else f"каждые {ih} ч. {im} мин."
+            pdf.set_font("DejaVu", "B", 8.5)
+            pdf.set_text_color(*C_DARK)
+            pdf.cell(65, 5, (m["name"] or "")[:32])
+            pdf.set_font("DejaVu", "", 8.5)
+            pdf.set_text_color(*C_PINK)
+            pdf.cell(40, 5, (m["dose"] or "—")[:18], align="C")
+            pdf.set_text_color(*C_MID)
+            pdf.cell(45, 5, ivl,                      align="C")
+            pdf.cell(38, 5, m["end_date"] or "—",     align="C", ln=True)
     else:
-        pdf.set_font("DejaVu", "", 10)
-        pdf.set_text_color(*C_GRAY_MID)
-        pdf.cell(0, 8, "  Лекарства не записаны", ln=True)
+        pdf.set_font("DejaVu", "", 9)
+        pdf.set_text_color(*C_MID)
+        pdf.cell(0, 7, "  Лекарства не записаны", ln=True)
 
     # ── ПОДВАЛ ───────────────────────────────────────────────────────────────
     pdf.ln(8)
-    pdf.set_fill_color(*C_PINK)
-    pdf.rect(0, pdf.get_y(), 210, 12, "F")
-    pdf.set_font("DejaVu", "", 8)
-    pdf.set_text_color(*C_WHITE)
-    pdf.cell(0, 12, "МамаБот · Отчёт сформирован автоматически · Только для личного использования", align="C", ln=True)
+    y = pdf.get_y()
+    _rr(pdf, 10, y, 190, 10, r=3, fill_color=C_LIGHT)
+    pdf.set_xy(10, y + 2)
+    pdf.set_font("DejaVu", "", 7.5)
+    pdf.set_text_color(*C_MID)
+    pdf.cell(0, 6,
+             "МамаБот  ·  Отчёт сформирован автоматически  ·  Только для личного использования",
+             align="C", ln=True)
 
     return bytes(pdf.output())
 
+
+# ── Telegram handlers ─────────────────────────────────────────────────────────
 
 async def export_pdf_select_child(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -419,10 +430,9 @@ async def _do_export_from_message(message, context, child_id: int, user_id: int)
         return
 
     wait_msg = await message.reply_text("⏳ Создаю PDF-отчёт для педиатра, подождите...")
-
-    growth = db.get_growth_records(child_id, user_id, limit=100)
-    vaccines = db.get_vaccinations(child_id, user_id)
-    illnesses = db.get_illnesses(child_id, active_only=False, limit=20)
+    growth      = db.get_growth_records(child_id, user_id, limit=100)
+    vaccines    = db.get_vaccinations(child_id, user_id)
+    illnesses   = db.get_illnesses(child_id, active_only=False, limit=20)
     medications = db.get_medications(child_id, active_only=False)
 
     try:
@@ -448,17 +458,15 @@ async def _do_export(query, context, child_id: int, user_id: int):
         return
 
     await query.edit_message_text("⏳ Создаю полный PDF-отчёт для педиатра, подождите...")
-
-    growth = db.get_growth_records(child_id, user_id, limit=100)
-    vaccines = db.get_vaccinations(child_id, user_id)
-    illnesses = db.get_illnesses(child_id, active_only=False, limit=20)
+    growth      = db.get_growth_records(child_id, user_id, limit=100)
+    vaccines    = db.get_vaccinations(child_id, user_id)
+    illnesses   = db.get_illnesses(child_id, active_only=False, limit=20)
     medications = db.get_medications(child_id, active_only=False)
 
     try:
         pdf_bytes = generate_child_pdf(ch, growth, vaccines, illnesses, medications)
         buf = io.BytesIO(pdf_bytes)
         buf.name = f"{ch['name']}_полный_отчет.pdf"
-
         keyboard = [[InlineKeyboardButton("👶 К ребёнку", callback_data=f"child_view:{child_id}")]]
         await query.message.reply_document(
             document=buf,
