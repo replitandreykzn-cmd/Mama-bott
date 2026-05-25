@@ -102,12 +102,6 @@ def generate_child_pdf(child, growth_records, vaccinations,
     pdf.rect(0, 0, 105, 30, "F")
     pdf.set_fill_color(*C_PINK)
     pdf.rect(105, 0, 105, 30, "F")
-    # затемнение
-    pdf.set_fill_color(0, 0, 0)
-    pdf.set_alpha(0.18)
-    pdf.rect(0, 0, 210, 30, "F")
-    pdf.set_alpha(1.0)
-
     pdf.set_font("DejaVu", "B", 18)
     pdf.set_text_color(*C_WHITE)
     pdf.set_xy(0, 6)
