@@ -599,7 +599,13 @@ def get_due_reminders(now_str: str = None):
     c = conn.cursor()
     if now_str is None:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    c.execute(_q("SELECT * FROM reminders WHERE is_active=1 AND remind_at<=?"), (now_str,))
+    # remind_at может быть в формате ISO (2026-05-26T13:30:00) или (2026-05-26 13:30)
+    # Нормализуем: заменяем T на пробел и берём первые 16 символов для сравнения
+    c.execute(_q("""
+        SELECT * FROM reminders
+        WHERE is_active=1
+        AND REPLACE(SUBSTR(remind_at, 1, 16), 'T', ' ') <= ?
+    """), (now_str,))
     rows = _fetchall(c)
     conn.close()
     return rows
