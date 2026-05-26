@@ -1,5 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import ContextTypes, ConversationHandler
 from datetime import datetime, date
 import database as db
 
@@ -67,6 +67,7 @@ async def show_children_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def show_child_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Главная страница ребёнка — показывает всю ключевую информацию сразу."""
     query = update.callback_query
     await query.answer()
     child_id = int(query.data.split(":")[1])
@@ -80,18 +81,97 @@ async def show_child_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     age = age_str(ch["birthdate"])
     gender_str = "Девочка" if ch["gender"] == "girl" else "Мальчик"
 
+    # ── Последний замер роста/веса ─────────────────────────────────────
+    growth = db.get_growth_records(child_id, user_id, limit=1)
+    growth_str = "—"
+    if growth:
+        last = growth[0]
+        parts = []
+        if last["height_cm"]:
+            parts.append(f"{last['height_cm']} см")
+        if last["weight_kg"]:
+            parts.append(f"{last['weight_kg']} кг")
+        if parts:
+            growth_str = ", ".join(parts) + f" ({last['date']})"
+
+    # ── Ближайшая прививка ─────────────────────────────────────────────
+    vaccines = db.get_vaccinations(child_id, user_id)
+    next_vaccine_str = "—"
+    for v in vaccines:
+        if not v["done_date"] and v["scheduled_date"]:
+            try:
+                d = datetime.strptime(v["scheduled_date"], "%d.%m.%Y").date()
+                days_left = (d - date.today()).days
+                if days_left >= 0:
+                    if days_left == 0:
+                        next_vaccine_str = f"Сегодня! — {v['vaccine_name']}"
+                    elif days_left <= 7:
+                        next_vaccine_str = f"Через {days_left} дн. — {v['vaccine_name']}"
+                    else:
+                        next_vaccine_str = f"{v['scheduled_date']} — {v['vaccine_name']}"
+                    break
+            except Exception:
+                continue
+
+    # ── Следующий плановый осмотр ──────────────────────────────────────
+    try:
+        from handlers.checkups import get_checkup_dates
+        checkups = get_checkup_dates(ch["birthdate"])
+        next_checkup_str = "—"
+        for c in checkups:
+            if c["status"] in ("today", "soon", "upcoming"):
+                if c["status"] == "today":
+                    next_checkup_str = f"Сегодня! — {c['name']}"
+                elif c["status"] == "soon":
+                    next_checkup_str = f"Через {c['days_diff']} дн. — {c['name']}"
+                else:
+                    next_checkup_str = f"{c['date']} — {c['name']}"
+                break
+    except Exception:
+        next_checkup_str = "—"
+
+    # ── Активные лекарства ─────────────────────────────────────────────
+    meds = db.get_medications(child_id, active_only=True)
+    if meds:
+        med_names = [m["name"] for m in meds[:3]]
+        meds_str = ", ".join(med_names)
+        if len(meds) > 3:
+            meds_str += f" и ещё {len(meds) - 3}"
+    else:
+        meds_str = "нет"
+
+    # ── Активная болезнь ───────────────────────────────────────────────
+    illnesses = db.get_illnesses(child_id, active_only=True, limit=1)
+    illness_str = ""
+    if illnesses:
+        illness_str = f"\n🤒 *Болеет сейчас:* {illnesses[0]['illness_name']}"
+
     text = (
-        f"{emoji} *{ch['name']}*\n\n"
+        f"{emoji} *{ch['name']}*{illness_str}\n\n"
         f"📅 Дата рождения: {ch['birthdate']}\n"
         f"🎂 Возраст: {age}\n"
-        f"👤 Пол: {gender_str}"
+        f"👤 Пол: {gender_str}\n\n"
+        f"📏 *Последний замер:* {growth_str}\n"
+        f"💉 *Ближайшая прививка:* {next_vaccine_str}\n"
+        f"🏥 *Следующий осмотр:* {next_checkup_str}\n"
+        f"💊 *Активные лекарства:* {meds_str}"
     )
+
     keyboard = [
-        [InlineKeyboardButton("📏 Рост и вес", callback_data=f"growth_menu:{child_id}"),
-         InlineKeyboardButton("💉 Прививки", callback_data=f"vaccines_menu:{child_id}")],
-        [InlineKeyboardButton("📄 Экспорт PDF", callback_data=f"pdf_export:{child_id}")],
-        [InlineKeyboardButton("🗑 Удалить", callback_data=f"child_delete:{child_id}")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="my_child")],
+        [
+            InlineKeyboardButton("📏 Рост и вес",   callback_data=f"growth_menu:{child_id}"),
+            InlineKeyboardButton("💉 Прививки",      callback_data=f"vaccines_menu:{child_id}"),
+        ],
+        [
+            InlineKeyboardButton("🏥 Осмотры",       callback_data=f"checkup_child:{child_id}"),
+            InlineKeyboardButton("💊 Лекарства",     callback_data=f"med_child:{child_id}"),
+        ],
+        [
+            InlineKeyboardButton("📄 PDF",           callback_data=f"pdf_export:{child_id}"),
+            InlineKeyboardButton("📊 Excel",         callback_data=f"excel_export:{child_id}"),
+        ],
+        [InlineKeyboardButton("🗑 Удалить",          callback_data=f"child_delete:{child_id}")],
+        [InlineKeyboardButton("◀️ Назад",            callback_data="my_child")],
     ]
     await query.edit_message_text(text, parse_mode="Markdown",
                                   reply_markup=InlineKeyboardMarkup(keyboard))
@@ -129,7 +209,9 @@ async def got_child_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Дата не может быть в будущем. Попробуйте снова:")
             return CHILD_DATE
     except ValueError:
-        await update.message.reply_text("Неверный формат. Введите дату в виде ДД.ММ.ГГГГ (например, 15.03.2023):")
+        await update.message.reply_text(
+            "Неверный формат. Введите дату в виде ДД.ММ.ГГГГ (например, 15.03.2023):"
+        )
         return CHILD_DATE
 
     context.user_data["adding_child"]["birthdate"] = text
@@ -175,11 +257,10 @@ async def confirm_delete_child(update: Update, context: ContextTypes.DEFAULT_TYP
     if not ch:
         await query.edit_message_text("Ребёнок не найден.")
         return
-
-    keyboard = [
-        [InlineKeyboardButton("✅ Да, удалить", callback_data=f"child_delete_confirm:{child_id}"),
-         InlineKeyboardButton("❌ Отмена", callback_data=f"child_view:{child_id}")]
-    ]
+    keyboard = [[
+        InlineKeyboardButton("✅ Да, удалить", callback_data=f"child_delete_confirm:{child_id}"),
+        InlineKeyboardButton("❌ Отмена",       callback_data=f"child_view:{child_id}")
+    ]]
     await query.edit_message_text(
         f"⚠️ Удалить *{ch['name']}* и все его данные (рост, прививки)?",
         parse_mode="Markdown",
@@ -218,20 +299,20 @@ def _seed_vaccination_schedule(child_id: int, user_id: int, birthdate_str: str):
         return (bd + timedelta(days=days)).strftime("%d.%m.%Y")
 
     schedule = [
-        ("БЦЖ (туберкулёз)", _d(days=3)),
-        ("Гепатит B (1-я доза)", _d(days=1)),
-        ("Гепатит B (2-я доза)", _d(months=1)),
-        ("Пневмококк (1-я доза)", _d(months=2)),
-        ("АКДС (1-я доза) + Полиомиелит + Hib", _d(months=3)),
-        ("АКДС (2-я доза) + Полиомиелит + Hib", _d(months=4)),
+        ("БЦЖ (туберкулёз)",                                          _d(days=3)),
+        ("Гепатит B (1-я доза)",                                       _d(days=1)),
+        ("Гепатит B (2-я доза)",                                       _d(months=1)),
+        ("Пневмококк (1-я доза)",                                      _d(months=2)),
+        ("АКДС (1-я доза) + Полиомиелит + Hib",                       _d(months=3)),
+        ("АКДС (2-я доза) + Полиомиелит + Hib",                       _d(months=4)),
         ("Пневмококк (2-я доза) + АКДС (3-я доза) + Полиомиелит + Hib", _d(months=6)),
-        ("Гепатит B (3-я доза)", _d(months=6)),
-        ("Корь, краснуха, паротит (1-я доза)", _d(months=12)),
-        ("Ветряная оспа (1-я доза)", _d(months=12)),
-        ("Пневмококк (ревакцинация)", _d(months=15)),
-        ("АКДС (ревакцинация 1) + Полиомиелит + Hib", _d(months=18)),
-        ("Полиомиелит (ревакцинация 2)", _d(months=20)),
-        ("Корь, краснуха, паротит (ревакцинация)", _d(months=72)),
+        ("Гепатит B (3-я доза)",                                       _d(months=6)),
+        ("Корь, краснуха, паротит (1-я доза)",                        _d(months=12)),
+        ("Ветряная оспа (1-я доза)",                                   _d(months=12)),
+        ("Пневмококк (ревакцинация)",                                  _d(months=15)),
+        ("АКДС (ревакцинация 1) + Полиомиелит + Hib",                 _d(months=18)),
+        ("Полиомиелит (ревакцинация 2)",                               _d(months=20)),
+        ("Корь, краснуха, паротит (ревакцинация)",                    _d(months=72)),
     ]
 
     for vaccine_name, sched_date in schedule:
