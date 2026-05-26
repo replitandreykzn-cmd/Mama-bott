@@ -82,7 +82,7 @@ def _kv(pdf, label, value, lw=42):
 
 
 def generate_child_pdf(child, growth_records, vaccinations,
-                       illnesses=None, medications=None) -> bytes:
+                       illnesses=None, medications=None, allergies=None, contraindications=None) -> bytes:
     _ensure_font()
 
     pdf = FPDF()
@@ -354,6 +354,56 @@ def generate_child_pdf(child, growth_records, vaccinations,
         pdf.set_font("DejaVu", "", 9)
         pdf.set_text_color(*C_MID)
         pdf.cell(0, 7, "  Лекарства не записаны", ln=True)
+
+    # ── АЛЛЕРГИИ И ПРОТИВОПОКАЗАНИЯ ─────────────────────────────────────────
+    C_VIOLET       = (139, 92, 246)
+    C_VIOLET_LIGHT = (245, 243, 255)
+
+    _section(pdf, "Аллергии и противопоказания", "⚠", C_VIOLET)
+
+    if allergies:
+        y = pdf.get_y()
+        _rr(pdf, 10, y, 190, 8, r=2, fill_color=C_VIOLET)
+        pdf.set_xy(12, y + 1)
+        pdf.set_font("DejaVu", "B", 8.5)
+        pdf.set_text_color(*C_WHITE)
+        pdf.cell(70, 6, "Аллерген")
+        pdf.cell(70, 6, "Реакция",   align="C")
+        pdf.cell(48, 6, "Тяжесть",   align="C", ln=True)
+
+        sev_map = {"mild": "🟡 Лёгкая", "moderate": "🟠 Средняя", "severe": "🔴 Тяжёлая"}
+        for i, a in enumerate(allergies):
+            y = pdf.get_y()
+            bg = C_VIOLET_LIGHT if i % 2 == 0 else C_WHITE
+            _rr(pdf, 10, y, 190, 7, r=0, fill_color=bg)
+            pdf.set_xy(12, y + 1)
+            sev_str = sev_map.get(a["severity"], "—")
+            sev_color = {"mild": C_AMBER, "moderate": (249, 115, 22), "severe": C_RED}.get(a["severity"], C_MID)
+            pdf.set_font("DejaVu", "B", 8.5)
+            pdf.set_text_color(*C_DARK)
+            pdf.cell(70, 5, (a["name"] or "")[:36])
+            pdf.set_font("DejaVu", "", 8.5)
+            pdf.set_text_color(*C_MID)
+            pdf.cell(70, 5, (a["reaction"] or "—")[:36], align="C")
+            pdf.set_font("DejaVu", "B", 8.5)
+            pdf.set_text_color(*sev_color)
+            pdf.cell(48, 5, sev_str, align="C", ln=True)
+    else:
+        pdf.set_font("DejaVu", "", 9)
+        pdf.set_text_color(*C_MID)
+        pdf.cell(0, 7, "  Аллергий не записано", ln=True)
+
+    if contraindications:
+        pdf.ln(3)
+        pdf.set_font("DejaVu", "B", 9)
+        pdf.set_text_color(*C_VIOLET)
+        pdf.set_x(12)
+        pdf.cell(0, 6, "🚫  Противопоказания:", ln=True)
+        for c in contraindications:
+            pdf.set_x(14)
+            pdf.set_font("DejaVu", "", 8.5)
+            pdf.set_text_color(*C_DARK)
+            pdf.cell(0, 5, f"• {c['name']}", ln=True)
 
     # ── ПОДВАЛ ───────────────────────────────────────────────────────────────
     pdf.ln(8)
