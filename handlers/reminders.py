@@ -78,11 +78,15 @@ async def got_reminder_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def got_reminder_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    text = update.message.text.strip().replace(".", ":").replace("-", ":")
+    # Нормализуем: 8:00 → 08:00, 8.00 → 08:00
+    if ":" in text:
+        parts = text.split(":")
+        text = f"{int(parts[0]):02d}:{parts[1].zfill(2)}"
     try:
         datetime.strptime(text, "%H:%M")
     except ValueError:
-        await update.message.reply_text("Неверный формат. Введите ЧЧ:ММ (например 09:00):")
+        await update.message.reply_text("Неверный формат. Введите время (например 9:00 или 09:00):")
         return REM_TIME
 
     data = context.user_data.get("reminder_data", {})
