@@ -11,7 +11,7 @@ from handlers.child import age_str
 
 
 def generate_child_xlsx(child, growth_records, vaccinations,
-                        illnesses=None, medications=None) -> bytes:
+                        illnesses=None, medications=None, allergies=None, contraindications=None) -> bytes:
     try:
         import openpyxl
         from openpyxl.styles import (
@@ -317,6 +317,86 @@ def generate_child_xlsx(child, growth_records, vaccinations,
         ws5["A3"].font = body_font(color=GRAY_MID)
         ws5["A3"].alignment = center()
 
+    # ══════════════════════════════════════════════════════════════════════
+    # Лист 6: Аллергии и противопоказания
+    # ══════════════════════════════════════════════════════════════════════
+    VIOLET      = "FF8B5CF6"
+    VIOLET_LIGHT= "FFF5F3FF"
+
+    ws6 = wb.create_sheet("Аллергии")
+    ws6.sheet_view.showGridLines = False
+    for col, w in [("A", 28), ("B", 30), ("C", 16)]:
+        ws6.column_dimensions[col].width = w
+
+    ws6.merge_cells("A1:C1")
+    ws6["A1"] = "⚠️ Аллергии и противопоказания"
+    ws6["A1"].font = header_font(size=12)
+    ws6["A1"].fill = hdr_fill(VIOLET)
+    ws6["A1"].alignment = center()
+    ws6.row_dimensions[1].height = 28
+
+    headers6 = ["Аллерген", "Реакция", "Тяжесть"]
+    for ci, h in enumerate(headers6, 1):
+        cell = ws6.cell(row=2, column=ci, value=h)
+        cell.font = header_font(color=WHITE)
+        cell.fill = hdr_fill("FFA78BFA")
+        cell.alignment = center()
+        cell.border = thin_border()
+    ws6.row_dimensions[2].height = 20
+
+    sev_map = {"mild": "🟡 Лёгкая", "moderate": "🟠 Средняя", "severe": "🔴 Тяжёлая"}
+    sev_colors = {"mild": "FFF59E0B", "moderate": "FFF97316", "severe": "FFEF4444"}
+
+    for ri, a in enumerate(allergies or [], start=3):
+        ws6.row_dimensions[ri].height = 18
+        bg = VIOLET_LIGHT if ri % 2 == 1 else WHITE
+        sev_str = sev_map.get(a["severity"], "—")
+        sev_col = sev_colors.get(a["severity"], GRAY_MID)
+        for ci, val in enumerate([a["name"], a["reaction"] or "—", sev_str], 1):
+            cell = ws6.cell(row=ri, column=ci, value=val)
+            cell.fill = hdr_fill(bg)
+            cell.alignment = left()
+            cell.border = thin_border()
+            if ci == 3:
+                cell.font = Font(name="Calibri", bold=True, color=sev_col, size=10)
+            else:
+                cell.font = body_font()
+
+    if not allergies:
+        ws6.merge_cells("A3:C3")
+        ws6["A3"] = "Аллергий не записано"
+        ws6["A3"].font = body_font(color=GRAY_MID)
+        ws6["A3"].alignment = center()
+
+    # Противопоказания
+    row_start = max(4, len(allergies or []) + 4)
+    ws6.row_dimensions[row_start].height = 8
+    row_start += 1
+
+    ws6.merge_cells(f"A{row_start}:C{row_start}")
+    ws6[f"A{row_start}"] = "🚫 Противопоказания"
+    ws6[f"A{row_start}"].font = Font(name="Calibri", bold=True, color=VIOLET, size=11)
+    ws6[f"A{row_start}"].alignment = left()
+    ws6.row_dimensions[row_start].height = 22
+    row_start += 1
+
+    for ri, c in enumerate(contraindications or [], start=row_start):
+        ws6.row_dimensions[ri].height = 18
+        bg = VIOLET_LIGHT if ri % 2 == 1 else WHITE
+        ws6.merge_cells(f"A{ri}:C{ri}")
+        cell = ws6[f"A{ri}"]
+        cell.value = f"• {c['name']}"
+        cell.font = body_font()
+        cell.fill = hdr_fill(bg)
+        cell.alignment = left()
+        cell.border = thin_border()
+
+    if not contraindications:
+        ws6.merge_cells(f"A{row_start}:C{row_start}")
+        ws6[f"A{row_start}"] = "Противопоказаний не записано"
+        ws6[f"A{row_start}"].font = body_font(color=GRAY_MID)
+        ws6[f"A{row_start}"].alignment = center()
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -377,12 +457,14 @@ async def _do_excel_export_msg(message, context, child_id, user_id):
         await message.reply_text("Ребёнок не найден.")
         return
     wait = await message.reply_text("⏳ Создаю Excel-файл...")
-    growth      = db.get_growth_records(child_id, user_id, limit=100)
-    vaccines    = db.get_vaccinations(child_id, user_id)
-    illnesses   = db.get_illnesses(child_id, active_only=False, limit=20)
-    medications = db.get_medications(child_id, active_only=False)
+    growth           = db.get_growth_records(child_id, user_id, limit=100)
+    vaccines         = db.get_vaccinations(child_id, user_id)
+    illnesses        = db.get_illnesses(child_id, active_only=False, limit=20)
+    medications      = db.get_medications(child_id, active_only=False)
+    allergies        = db.get_allergies(child_id)
+    contraindications = db.get_contraindications(child_id)
     try:
-        data = generate_child_xlsx(ch, growth, vaccines, illnesses, medications)
+        data = generate_child_xlsx(ch, growth, vaccines, illnesses, medications, allergies, contraindications)
         buf = io.BytesIO(data)
         buf.name = f"{ch['name']}_отчет.xlsx"
         await message.reply_document(document=buf, filename=f"{ch['name']}_отчет.xlsx",
@@ -398,12 +480,14 @@ async def _do_excel_export(query, context, child_id, user_id):
         await query.edit_message_text("Ребёнок не найден.")
         return
     await query.edit_message_text("⏳ Создаю Excel-файл, подождите...")
-    growth      = db.get_growth_records(child_id, user_id, limit=100)
-    vaccines    = db.get_vaccinations(child_id, user_id)
-    illnesses   = db.get_illnesses(child_id, active_only=False, limit=20)
-    medications = db.get_medications(child_id, active_only=False)
+    growth           = db.get_growth_records(child_id, user_id, limit=100)
+    vaccines         = db.get_vaccinations(child_id, user_id)
+    illnesses        = db.get_illnesses(child_id, active_only=False, limit=20)
+    medications      = db.get_medications(child_id, active_only=False)
+    allergies        = db.get_allergies(child_id)
+    contraindications = db.get_contraindications(child_id)
     try:
-        data = generate_child_xlsx(ch, growth, vaccines, illnesses, medications)
+        data = generate_child_xlsx(ch, growth, vaccines, illnesses, medications, allergies, contraindications)
         buf = io.BytesIO(data)
         buf.name = f"{ch['name']}_отчет.xlsx"
         keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=f"child_view:{child_id}")]]
