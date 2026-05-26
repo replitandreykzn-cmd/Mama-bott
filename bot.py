@@ -60,6 +60,7 @@ from handlers.illness import (
 from handlers.checkups import (
     show_checkups_menu, show_checkups_for_child_cb,
     show_all_checkups_cb, send_checkup_reminders,
+    show_mark_checkup_list_cb, mark_checkup_done_cb,
 )
 from handlers.medical_info import (
     show_medical_info_menu, show_medical_info_child_cb,
@@ -492,6 +493,8 @@ def main():
     app.add_handler(CallbackQueryHandler(show_checkups_menu,          pattern="^checkups$"))
     app.add_handler(CallbackQueryHandler(show_checkups_for_child_cb,  pattern="^checkup_child:"))
     app.add_handler(CallbackQueryHandler(show_all_checkups_cb,        pattern="^checkup_all:"))
+    app.add_handler(CallbackQueryHandler(show_mark_checkup_list_cb,   pattern="^checkup_mark_list:"))
+    app.add_handler(CallbackQueryHandler(mark_checkup_done_cb,        pattern="^checkup_mark:"))
 
     # ── Напоминания ───────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(show_reminders_menu, pattern="^reminders$"))
