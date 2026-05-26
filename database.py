@@ -218,6 +218,17 @@ def init_db():
         )
     """)
 
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS checkups_done (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            checkup_months INTEGER NOT NULL,
+            done_date TEXT NOT NULL,
+            UNIQUE(child_id, checkup_months)
+        )
+    """)
+
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS referrals (
             id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
@@ -269,6 +280,17 @@ def init_db():
             child_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS checkups_done (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            checkup_months INTEGER NOT NULL,
+            done_date TEXT NOT NULL,
+            UNIQUE(child_id, checkup_months)
         )
     """)
 
@@ -1000,3 +1022,43 @@ def get_referral_stats(user_id):
     bonused = row2["cnt"] if row2 else 0
     conn.close()
     return {"total": total, "bonused": bonused}
+
+
+# ── Пройденные осмотры ────────────────────────────────────────────────────────
+
+def mark_checkup_done(child_id, checkup_months):
+    conn = get_conn()
+    c = conn.cursor()
+    today = datetime.now().strftime("%d.%m.%Y")
+    if _is_pg():
+        c.execute(
+            "INSERT INTO checkups_done (child_id, checkup_months, done_date) "
+            "VALUES (%s,%s,%s) ON CONFLICT (child_id, checkup_months) DO UPDATE SET done_date=%s",
+            (child_id, checkup_months, today, today)
+        )
+    else:
+        c.execute(
+            "INSERT OR REPLACE INTO checkups_done (child_id, checkup_months, done_date) VALUES (?,?,?)",
+            (child_id, checkup_months, today)
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_checkups_done(child_id):
+    """Возвращает set месяцев пройденных осмотров."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT checkup_months FROM checkups_done WHERE child_id=?"), (child_id,))
+    rows = _fetchall(c)
+    conn.close()
+    return {r["checkup_months"] for r in rows}
+
+
+def unmark_checkup_done(child_id, checkup_months):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("DELETE FROM checkups_done WHERE child_id=? AND checkup_months=?"),
+              (child_id, checkup_months))
+    conn.commit()
+    conn.close()
