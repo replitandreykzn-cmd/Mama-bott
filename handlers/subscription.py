@@ -49,6 +49,7 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
         )
         keyboard = [
             [InlineKeyboardButton("👨‍👩‍👧 Управление семьёй", callback_data="family_menu")],
+            [InlineKeyboardButton("🎁 Пригласить подругу", callback_data="referral")],
         ]
     else:
         trial_used = user["trial_used"] if user else False
@@ -76,6 +77,7 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
             trial_btn
             + [
                 [InlineKeyboardButton("💳 Купить Premium", callback_data="sub_buy")],
+                [InlineKeyboardButton("🎁 Пригласить подругу (+7 дней)", callback_data="referral")],
                 [InlineKeyboardButton("💬 Написать администратору", url=f"https://t.me/{OWNER_USERNAME}")],
             ]
         )
