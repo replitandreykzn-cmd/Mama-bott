@@ -192,8 +192,9 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == BTN_MEDICAL:
         await show_medical_info_menu(update, context)
     elif text == BTN_CHAT:
-        if CHAT_URL:
-            keyboard = [[InlineKeyboardButton("💬 Открыть чат мам", url=CHAT_URL)]]
+        chat_url = os.environ.get("CHAT_URL", "")
+        if chat_url:
+            keyboard = [[InlineKeyboardButton("💬 Открыть чат мам", url=chat_url)]]
             await update.message.reply_text(
                 "💬 *Чат мам МамаБота*\n\nОбщайтесь, задавайте вопросы, делитесь опытом!",
                 parse_mode="Markdown",
