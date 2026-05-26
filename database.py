@@ -184,9 +184,108 @@ def init_db():
         )
     """)
 
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS medical_info (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL UNIQUE,
+            blood_group TEXT,
+            blood_rh TEXT,
+            policy_number TEXT,
+            policy_company TEXT,
+            snils TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS allergies (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            reaction TEXT,
+            severity TEXT DEFAULT 'mild',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS contraindications (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS referrals (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            referrer_user_id BIGINT NOT NULL,
+            referred_user_id BIGINT NOT NULL UNIQUE,
+            bonus_given INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     if not pg:
         for migration in [
             "ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN referred_by BIGINT",
+        ]:
+            try:
+                c.execute(migration)
+            except Exception:
+                pass
+
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS medical_info (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL UNIQUE,
+            blood_group TEXT,
+            blood_rh TEXT,
+            policy_number TEXT,
+            policy_company TEXT,
+            snils TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS allergies (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            reaction TEXT,
+            severity TEXT DEFAULT 'mild',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS contraindications (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS referrals (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            referrer_user_id BIGINT NOT NULL,
+            referred_user_id BIGINT NOT NULL UNIQUE,
+            bonus_given INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    if not pg:
+        for migration in [
+            "ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN referred_by BIGINT",
         ]:
             try:
                 c.execute(migration)
@@ -657,3 +756,213 @@ def get_all_users():
     rows = _fetchall(c)
     conn.close()
     return rows
+
+
+# ── Медицинская информация ────────────────────────────────────────────────────
+
+def get_medical_info(child_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM medical_info WHERE child_id=?"), (child_id,))
+    row = _fetchone(c)
+    conn.close()
+    return row
+
+
+def set_medical_info(child_id, blood_group=None, blood_rh=None,
+                     policy_number=None, policy_company=None, snils=None):
+    conn = get_conn()
+    c = conn.cursor()
+    existing = None
+    c.execute(_q("SELECT id FROM medical_info WHERE child_id=?"), (child_id,))
+    existing = _fetchone(c)
+
+    if existing:
+        fields, vals = [], []
+        if blood_group  is not None: fields.append("blood_group=?");    vals.append(blood_group)
+        if blood_rh     is not None: fields.append("blood_rh=?");       vals.append(blood_rh)
+        if policy_number is not None: fields.append("policy_number=?"); vals.append(policy_number)
+        if policy_company is not None: fields.append("policy_company=?"); vals.append(policy_company)
+        if snils        is not None: fields.append("snils=?");           vals.append(snils)
+        if fields:
+            vals.append(child_id)
+            c.execute(_q(f"UPDATE medical_info SET {', '.join(fields)} WHERE child_id=?"), vals)
+    else:
+        if _is_pg():
+            c.execute(
+                "INSERT INTO medical_info (child_id, blood_group, blood_rh, policy_number, policy_company, snils) "
+                "VALUES (%s,%s,%s,%s,%s,%s)",
+                (child_id, blood_group, blood_rh, policy_number, policy_company, snils)
+            )
+        else:
+            c.execute(
+                "INSERT INTO medical_info (child_id, blood_group, blood_rh, policy_number, policy_company, snils) "
+                "VALUES (?,?,?,?,?,?)",
+                (child_id, blood_group, blood_rh, policy_number, policy_company, snils)
+            )
+    conn.commit()
+    conn.close()
+
+
+# ── Аллергии ─────────────────────────────────────────────────────────────────
+
+def add_allergy(child_id, name, reaction="", severity="mild"):
+    conn = get_conn()
+    c = conn.cursor()
+    if _is_pg():
+        c.execute(
+            "INSERT INTO allergies (child_id, name, reaction, severity) VALUES (%s,%s,%s,%s)",
+            (child_id, name, reaction, severity)
+        )
+    else:
+        c.execute(
+            "INSERT INTO allergies (child_id, name, reaction, severity) VALUES (?,?,?,?)",
+            (child_id, name, reaction, severity)
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_allergies(child_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM allergies WHERE child_id=? ORDER BY severity DESC"), (child_id,))
+    rows = _fetchall(c)
+    conn.close()
+    return rows
+
+
+def delete_allergy(allergy_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT child_id FROM allergies WHERE id=?"), (allergy_id,))
+    row = _fetchone(c)
+    child_id = row["child_id"] if row else None
+    c.execute(_q("DELETE FROM allergies WHERE id=?"), (allergy_id,))
+    conn.commit()
+    conn.close()
+    return child_id
+
+
+# ── Противопоказания ──────────────────────────────────────────────────────────
+
+def add_contraindication(child_id, name):
+    conn = get_conn()
+    c = conn.cursor()
+    if _is_pg():
+        c.execute("INSERT INTO contraindications (child_id, name) VALUES (%s,%s)", (child_id, name))
+    else:
+        c.execute("INSERT INTO contraindications (child_id, name) VALUES (?,?)", (child_id, name))
+    conn.commit()
+    conn.close()
+
+
+def get_contraindications(child_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM contraindications WHERE child_id=? ORDER BY created_at"), (child_id,))
+    rows = _fetchall(c)
+    conn.close()
+    return rows
+
+
+def delete_contraindication(contra_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT child_id FROM contraindications WHERE id=?"), (contra_id,))
+    row = _fetchone(c)
+    child_id = row["child_id"] if row else None
+    c.execute(_q("DELETE FROM contraindications WHERE id=?"), (contra_id,))
+    conn.commit()
+    conn.close()
+    return child_id
+
+
+# ── Реферальная система ───────────────────────────────────────────────────────
+
+def get_referral_code(user_id):
+    """Реферальный код = просто ID пользователя."""
+    return str(user_id)
+
+
+def apply_referral(referred_user_id, referrer_user_id):
+    """Записывает реферала. Возвращает True если успешно."""
+    if referred_user_id == referrer_user_id:
+        return False
+    conn = get_conn()
+    c = conn.cursor()
+    # Проверяем что пользователь ещё не был приглашён
+    c.execute(_q("SELECT id FROM referrals WHERE referred_user_id=?"), (referred_user_id,))
+    if _fetchone(c):
+        conn.close()
+        return False
+    if _is_pg():
+        c.execute(
+            "INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+            (referrer_user_id, referred_user_id)
+        )
+    else:
+        c.execute(
+            "INSERT OR IGNORE INTO referrals (referrer_user_id, referred_user_id) VALUES (?,?)",
+            (referrer_user_id, referred_user_id)
+        )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def give_referral_bonus(referrer_user_id, bonus_days=7):
+    """Даёт бонус пригласившему."""
+    from datetime import datetime, timedelta
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT premium_until, is_premium FROM users WHERE user_id=?"), (referrer_user_id,))
+    row = _fetchone(c)
+    if not row:
+        conn.close()
+        return
+
+    now = datetime.now()
+    if row["is_premium"] and row["premium_until"]:
+        try:
+            base = datetime.fromisoformat(row["premium_until"])
+            if base < now:
+                base = now
+        except Exception:
+            base = now
+    else:
+        base = now
+
+    until = (base + timedelta(days=bonus_days)).isoformat()
+    if _is_pg():
+        c.execute(
+            "UPDATE users SET is_premium=1, premium_until=%s WHERE user_id=%s",
+            (until, referrer_user_id)
+        )
+    else:
+        c.execute(
+            "UPDATE users SET is_premium=1, premium_until=? WHERE user_id=?",
+            (until, referrer_user_id)
+        )
+    # Отмечаем что бонус выдан
+    c.execute(
+        _q("UPDATE referrals SET bonus_given=1 WHERE referrer_user_id=? AND bonus_given=0"),
+        (referrer_user_id,)
+    )
+    conn.commit()
+    conn.close()
+    return until
+
+
+def get_referral_stats(user_id):
+    """Статистика рефералов пользователя."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_user_id=?"), (user_id,))
+    row = _fetchone(c)
+    total = row["cnt"] if row else 0
+    c.execute(_q("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_user_id=? AND bonus_given=1"), (user_id,))
+    row2 = _fetchone(c)
+    bonused = row2["cnt"] if row2 else 0
+    conn.close()
+    return {"total": total, "bonused": bonused}
