@@ -43,6 +43,7 @@ from handlers.subscription import (
     FAMILY_ADD_ID,
 )
 from handlers.pdf_export import export_pdf_select_child, export_pdf_for_child
+from handlers.excel_export import export_excel_select_child, export_excel_for_child_cb
 from handlers.admin import cmd_grant, cmd_revoke, cmd_stats, cmd_users, cmd_broadcast, check_premium_expiry
 from handlers.medications import (
     show_medications_menu, show_meds_child_cb, start_add_medication,
@@ -55,6 +56,27 @@ from handlers.illness import (
     start_add_entry, got_entry_temp, got_entry_symptoms, got_entry_meds, got_entry_notes,
     end_illness_cb, show_illness_history, cancel_illness,
     ILL_CHILD, ILL_NAME, ILL_ENTRY_TEMP, ILL_ENTRY_SYM, ILL_ENTRY_MEDS, ILL_ENTRY_NOTES,
+)
+from handlers.checkups import (
+    show_checkups_menu, show_checkups_for_child_cb,
+    show_all_checkups_cb, send_checkup_reminders,
+)
+from handlers.medical_info import (
+    show_medical_info_menu, show_medical_info_child_cb,
+    set_blood_group_cb, got_blood_group_cb, got_blood_rh_cb,
+    set_policy_cb, got_policy_number, got_policy_company, got_snils,
+    start_add_allergy_cb, got_allergy_name, got_allergy_reaction, got_allergy_severity_cb,
+    show_allergy_delete_list_cb, delete_allergy_cb,
+    start_add_contra_cb, got_contra_name,
+    show_contra_delete_list_cb, delete_contra_cb,
+    cancel_mi,
+    MI_POLICY_NUMBER, MI_POLICY_COMPANY, MI_SNILS,
+    MI_ALLERGY_NAME, MI_ALLERGY_REACTION, MI_ALLERGY_SEVERITY,
+    MI_CONTRA_NAME,
+)
+from handlers.referral import show_referral_menu, handle_referral_start
+from handlers.onboarding import (
+    start_onboarding, onboarding_step_cb, finish_onboarding_cb,
 )
 
 logging.basicConfig(
@@ -75,20 +97,29 @@ BTN_MEDICATIONS  = "💊 Лекарства"
 BTN_ILLNESS      = "🤒 Болезни"
 BTN_SUBSCRIPTION = "⭐ Подписка"
 BTN_PDF          = "📄 PDF для врача"
+BTN_CHECKUPS     = "🏥 Осмотры"
+BTN_EXCEL        = "📊 Excel"
+BTN_MEDICAL      = "🏥 Медкарта"
+BTN_CHAT         = "💬 Чат мам"
+
+CHAT_URL = os.environ.get("CHAT_URL", "")
 
 MENU_BUTTONS = [
     BTN_CHILD, BTN_GROWTH, BTN_VACCINES, BTN_REMINDERS,
     BTN_MEDICATIONS, BTN_ILLNESS, BTN_SUBSCRIPTION, BTN_PDF,
+    BTN_CHECKUPS, BTN_EXCEL, BTN_MEDICAL, BTN_CHAT,
 ]
 
 
 def main_reply_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [BTN_CHILD,       BTN_GROWTH],
-            [BTN_VACCINES,    BTN_REMINDERS],
-            [BTN_MEDICATIONS, BTN_ILLNESS],
-            [BTN_SUBSCRIPTION, BTN_PDF],
+            [BTN_CHILD,        BTN_GROWTH],
+            [BTN_VACCINES,     BTN_REMINDERS],
+            [BTN_MEDICATIONS,  BTN_ILLNESS],
+            [BTN_CHECKUPS,     BTN_MEDICAL],
+            [BTN_PDF,          BTN_EXCEL],
+            [BTN_SUBSCRIPTION, BTN_CHAT],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -102,33 +133,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_new = db.upsert_user(user.id, user.username, user.first_name)
     name = user.first_name or "Мамочка"
 
+    # Реферальная ссылка
+    args = context.args
+    if args and args[0].startswith("ref"):
+        import asyncio
+        asyncio.create_task(handle_referral_start(user.id, args[0], context.application))
+
     if is_new:
         until = db.activate_trial(user.id)
         until_str = datetime.fromisoformat(until).strftime("%d.%m.%Y") if until else ""
         welcome = (
             f"Привет, {name}! 🌸\n\n"
             f"Добро пожаловать в *МамаБот* — помощник для мам!\n\n"
-            f"🎁 *Вам активирован бесплатный период на {TRIAL_DAYS} дней* (до {until_str}).\n"
-            f"Все Premium-функции уже доступны:\n"
-            f"• Неограниченное количество детей\n"
-            f"• Полная история роста и веса\n"
-            f"• Прививки и напоминания\n"
-            f"• Лекарства, журнал болезней\n"
-            f"• PDF-отчёт для педиатра и семейный доступ\n\n"
-            f"После пробного периода — *300 ₽/мес*.\n\n"
+            f"🎁 *Активирован бесплатный период на {TRIAL_DAYS} дней* (до {until_str}).\n\n"
             f"Выберите раздел в меню ниже 👇"
         )
+        await update.message.reply_text(
+            welcome, parse_mode="Markdown",
+            reply_markup=main_reply_keyboard()
+        )
+        # Запускаем онбординг для новых пользователей
+        await start_onboarding(update, context)
     else:
         welcome = (
             f"С возвращением, {name}! 🌸\n\n"
             f"Выберите раздел в меню ниже 👇"
         )
-
-    await update.message.reply_text(
-        welcome,
-        parse_mode="Markdown",
-        reply_markup=main_reply_keyboard()
-    )
+        await update.message.reply_text(
+            welcome, parse_mode="Markdown",
+            reply_markup=main_reply_keyboard()
+        )
 
 
 # ── Роутинг кнопок клавиатуры ────────────────────────────────────────────────
@@ -151,6 +185,22 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_subscription_menu(update, context)
     elif text == BTN_PDF:
         await export_pdf_select_child(update, context)
+    elif text == BTN_CHECKUPS:
+        await show_checkups_menu(update, context)
+    elif text == BTN_EXCEL:
+        await export_excel_select_child(update, context)
+    elif text == BTN_MEDICAL:
+        await show_medical_info_menu(update, context)
+    elif text == BTN_CHAT:
+        if CHAT_URL:
+            keyboard = [[InlineKeyboardButton("💬 Открыть чат мам", url=CHAT_URL)]]
+            await update.message.reply_text(
+                "💬 *Чат мам МамаБота*\n\nОбщайтесь, задавайте вопросы, делитесь опытом!",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await update.message.reply_text("Чат скоро будет добавлен!")
 
 
 async def route_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,7 +241,6 @@ async def check_medications(app: Application):
     for m in meds:
         try:
             next_at = datetime.fromisoformat(m["next_reminder_at"])
-            # Если next_at без таймзоны — считаем его московским
             if next_at.tzinfo is None:
                 next_at = next_at.replace(tzinfo=TZ)
         except Exception:
@@ -279,11 +328,9 @@ def main():
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
 
     app = Application.builder().token(token).build()
-
     kb_filter = filters.Text(MENU_BUTTONS)
 
     # ── Диалоги ──────────────────────────────────────────────────────────────
-
     add_child_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_add_child, pattern="^child_add$")],
         states={
@@ -350,21 +397,52 @@ def main():
     add_illness_entry_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_add_entry, pattern="^ill_add_entry:")],
         states={
-            ILL_ENTRY_TEMP: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_temp)],
-            ILL_ENTRY_SYM:  [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_symptoms)],
-            ILL_ENTRY_MEDS: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_meds)],
-            ILL_ENTRY_NOTES:[MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_notes)],
+            ILL_ENTRY_TEMP:  [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_temp)],
+            ILL_ENTRY_SYM:   [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_symptoms)],
+            ILL_ENTRY_MEDS:  [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_meds)],
+            ILL_ENTRY_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_entry_notes)],
         },
         fallbacks=[CommandHandler("cancel", cancel_illness), MessageHandler(kb_filter, route_keyboard)],
         allow_reentry=True,
     )
 
+    policy_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(set_policy_cb, pattern="^mi_policy:")],
+        states={
+            MI_POLICY_NUMBER:  [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_policy_number)],
+            MI_POLICY_COMPANY: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_policy_company)],
+            MI_SNILS:          [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_snils)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_mi), MessageHandler(kb_filter, route_keyboard)],
+        allow_reentry=True,
+    )
+
+    allergy_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_add_allergy_cb, pattern="^mi_allergy_add:")],
+        states={
+            MI_ALLERGY_NAME:     [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_allergy_name)],
+            MI_ALLERGY_REACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_allergy_reaction)],
+            MI_ALLERGY_SEVERITY: [CallbackQueryHandler(got_allergy_severity_cb, pattern="^mi_asev:")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_mi), MessageHandler(kb_filter, route_keyboard)],
+        allow_reentry=True,
+    )
+
+    contra_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_add_contra_cb, pattern="^mi_contra_add:")],
+        states={
+            MI_CONTRA_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_contra_name)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_mi), MessageHandler(kb_filter, route_keyboard)],
+        allow_reentry=True,
+    )
+
     # ── Команды ──────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("grant", cmd_grant))
-    app.add_handler(CommandHandler("revoke", cmd_revoke))
-    app.add_handler(CommandHandler("stats", cmd_stats))
-    app.add_handler(CommandHandler("users", cmd_users))
+    app.add_handler(CommandHandler("grant",     cmd_grant))
+    app.add_handler(CommandHandler("revoke",    cmd_revoke))
+    app.add_handler(CommandHandler("stats",     cmd_stats))
+    app.add_handler(CommandHandler("users",     cmd_users))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
 
     # ── Диалоги ──────────────────────────────────────────────────────────────
@@ -375,63 +453,91 @@ def main():
     app.add_handler(add_med_conv)
     app.add_handler(add_illness_conv)
     app.add_handler(add_illness_entry_conv)
+    app.add_handler(policy_conv)
+    app.add_handler(allergy_conv)
+    app.add_handler(contra_conv)
 
-    # ── Кнопки нижней клавиатуры ─────────────────────────────────────────────
+    # ── Кнопки клавиатуры ────────────────────────────────────────────────────
     app.add_handler(MessageHandler(kb_filter, route_keyboard))
 
-    # ── Inline callbacks: дети ───────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(show_children_menu, pattern="^my_child$"))
-    app.add_handler(CallbackQueryHandler(show_child_detail, pattern="^child_view:"))
+    # ── Онбординг ────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(onboarding_step_cb,   pattern="^onboard:\\d+$"))
+    app.add_handler(CallbackQueryHandler(finish_onboarding_cb, pattern="^onboard_done$"))
+
+    # ── Дети ─────────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(show_children_menu,  pattern="^my_child$"))
+    app.add_handler(CallbackQueryHandler(show_child_detail,   pattern="^child_view:"))
     app.add_handler(CallbackQueryHandler(confirm_delete_child, pattern="^child_delete:"))
-    app.add_handler(CallbackQueryHandler(do_delete_child, pattern="^child_delete_confirm:"))
+    app.add_handler(CallbackQueryHandler(do_delete_child,     pattern="^child_delete_confirm:"))
 
-    # ── Inline callbacks: рост ───────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(route_growth, pattern="^growth$"))
-    app.add_handler(CallbackQueryHandler(show_growth_menu, pattern="^growth_menu:"))
+    # ── Рост ─────────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(route_growth,       pattern="^growth$"))
+    app.add_handler(CallbackQueryHandler(show_growth_menu,   pattern="^growth_menu:"))
 
-    # ── Inline callbacks: прививки ───────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(route_vaccines, pattern="^vaccines$"))
-    app.add_handler(CallbackQueryHandler(show_vaccines_menu, pattern="^vaccines_menu:"))
-    app.add_handler(CallbackQueryHandler(show_vaccines_list, pattern="^vaccines_list:"))
-    app.add_handler(CallbackQueryHandler(show_done_list, pattern="^vaccines_done_list:"))
-    app.add_handler(CallbackQueryHandler(mark_vaccine_done, pattern="^vac_mark:"))
+    # ── Прививки ─────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(route_vaccines,      pattern="^vaccines$"))
+    app.add_handler(CallbackQueryHandler(show_vaccines_menu,  pattern="^vaccines_menu:"))
+    app.add_handler(CallbackQueryHandler(show_vaccines_list,  pattern="^vaccines_list:"))
+    app.add_handler(CallbackQueryHandler(show_done_list,      pattern="^vaccines_done_list:"))
+    app.add_handler(CallbackQueryHandler(mark_vaccine_done,   pattern="^vac_mark:"))
 
-    # ── Inline callbacks: напоминания ────────────────────────────────────────
+    # ── Осмотры ──────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(show_checkups_menu,          pattern="^checkups$"))
+    app.add_handler(CallbackQueryHandler(show_checkups_for_child_cb,  pattern="^checkup_child:"))
+    app.add_handler(CallbackQueryHandler(show_all_checkups_cb,        pattern="^checkup_all:"))
+
+    # ── Напоминания ───────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(show_reminders_menu, pattern="^reminders$"))
-    app.add_handler(CallbackQueryHandler(show_delete_list, pattern="^reminder_delete_list$"))
-    app.add_handler(CallbackQueryHandler(do_delete_reminder, pattern="^reminder_delete:"))
+    app.add_handler(CallbackQueryHandler(show_delete_list,    pattern="^reminder_delete_list$"))
+    app.add_handler(CallbackQueryHandler(do_delete_reminder,  pattern="^reminder_delete:"))
 
-    # ── Inline callbacks: подписка ───────────────────────────────────────────
+    # ── Подписка ─────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(show_subscription_menu, pattern="^subscription$"))
-    app.add_handler(CallbackQueryHandler(activate_trial, pattern="^sub_trial$"))
-    app.add_handler(CallbackQueryHandler(buy_premium, pattern="^sub_buy$"))
-    app.add_handler(CallbackQueryHandler(goto_subscription, pattern="^goto_subscription$"))
-    app.add_handler(CallbackQueryHandler(show_family_menu, pattern="^family_menu$"))
-    app.add_handler(CallbackQueryHandler(remove_family_member, pattern="^family_remove:"))
+    app.add_handler(CallbackQueryHandler(activate_trial,         pattern="^sub_trial$"))
+    app.add_handler(CallbackQueryHandler(buy_premium,            pattern="^sub_buy$"))
+    app.add_handler(CallbackQueryHandler(goto_subscription,      pattern="^goto_subscription$"))
+    app.add_handler(CallbackQueryHandler(show_family_menu,       pattern="^family_menu$"))
+    app.add_handler(CallbackQueryHandler(remove_family_member,   pattern="^family_remove:"))
 
-    # ── Inline callbacks: PDF ────────────────────────────────────────────────
+    # ── PDF ──────────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(export_pdf_select_child, pattern="^pdf_select$"))
-    app.add_handler(CallbackQueryHandler(export_pdf_for_child, pattern="^pdf_export:"))
+    app.add_handler(CallbackQueryHandler(export_pdf_for_child,    pattern="^pdf_export:"))
 
-    # ── Inline callbacks: лекарства ──────────────────────────────────────────
+    # ── Excel ─────────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(export_excel_select_child, pattern="^excel_select$"))
+    app.add_handler(CallbackQueryHandler(export_excel_for_child_cb, pattern="^excel_export:"))
+
+    # ── Лекарства ────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(show_meds_child_cb, pattern="^med_child:"))
-    app.add_handler(CallbackQueryHandler(show_stop_list, pattern="^med_stop_list:"))
-    app.add_handler(CallbackQueryHandler(stop_medication, pattern="^med_stop:"))
+    app.add_handler(CallbackQueryHandler(show_stop_list,     pattern="^med_stop_list:"))
+    app.add_handler(CallbackQueryHandler(stop_medication,    pattern="^med_stop:"))
 
-    # ── Inline callbacks: болезни ────────────────────────────────────────────
+    # ── Медкарта ─────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(show_medical_info_menu,       pattern="^medical_info$"))
+    app.add_handler(CallbackQueryHandler(show_medical_info_child_cb,   pattern="^mi_child:"))
+    app.add_handler(CallbackQueryHandler(set_blood_group_cb,           pattern="^mi_blood:"))
+    app.add_handler(CallbackQueryHandler(got_blood_group_cb,           pattern="^mi_bg:"))
+    app.add_handler(CallbackQueryHandler(got_blood_rh_cb,              pattern="^mi_rh:"))
+    app.add_handler(CallbackQueryHandler(show_allergy_delete_list_cb,  pattern="^mi_allergy_del_list:"))
+    app.add_handler(CallbackQueryHandler(delete_allergy_cb,            pattern="^mi_allergy_del:"))
+    app.add_handler(CallbackQueryHandler(show_contra_delete_list_cb,   pattern="^mi_contra_del_list:"))
+    app.add_handler(CallbackQueryHandler(delete_contra_cb,             pattern="^mi_contra_del:"))
+
+    # ── Реферальная система ───────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(show_referral_menu, pattern="^referral$"))
+
+    # ── Болезни ───────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(show_illness_child_cb, pattern="^ill_child:"))
-    app.add_handler(CallbackQueryHandler(end_illness_cb, pattern="^ill_end:"))
-    app.add_handler(CallbackQueryHandler(show_illness_history, pattern="^ill_history:"))
+    app.add_handler(CallbackQueryHandler(end_illness_cb,        pattern="^ill_end:"))
+    app.add_handler(CallbackQueryHandler(show_illness_history,  pattern="^ill_history:"))
 
     # ── Планировщик ──────────────────────────────────────────────────────────
     scheduler = AsyncIOScheduler(timezone=TZ)
-    scheduler.add_job(check_reminders, "interval", minutes=1, args=[app])
-    scheduler.add_job(check_medications, "interval", minutes=1, args=[app])
-    scheduler.add_job(
-        send_weekly_vaccine_reminders,
-        "cron", day_of_week="mon", hour=9, minute=0, args=[app]
-    )
-    scheduler.add_job(check_premium_expiry, "interval", hours=12, args=[app])
+    scheduler.add_job(check_reminders,               "interval", minutes=1,  args=[app])
+    scheduler.add_job(check_medications,             "interval", minutes=1,  args=[app])
+    scheduler.add_job(send_weekly_vaccine_reminders, "cron", day_of_week="mon", hour=9, minute=0, args=[app])
+    scheduler.add_job(send_checkup_reminders,        "cron", hour=9, minute=0, args=[app])
+    scheduler.add_job(check_premium_expiry,          "interval", hours=12, args=[app])
     scheduler.start()
 
     logger.info("МамаБот запущен!")
