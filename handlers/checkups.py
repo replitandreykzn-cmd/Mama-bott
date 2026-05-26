@@ -33,7 +33,7 @@ CHECKUP_SCHEDULE = [
 ]
 
 
-def get_checkup_dates(birthdate_str: str):
+def get_checkup_dates(birthdate_str: str, done_months: set = None):
     """Возвращает список осмотров с датами и статусами."""
     try:
         bd = datetime.strptime(birthdate_str, "%d.%m.%Y").date()
@@ -41,23 +41,30 @@ def get_checkup_dates(birthdate_str: str):
         return []
 
     today = date.today()
+    done_months = done_months or set()
     result = []
+
     for name, months in CHECKUP_SCHEDULE:
         visit_date = bd + relativedelta(months=months)
         days_diff = (visit_date - today).days
-        if days_diff < -30:
-            status = "past"       # давно прошёл
+
+        # Если отмечен вручную как пройденный
+        if months in done_months:
+            status = "done"
+        elif days_diff < -30:
+            status = "past"
         elif days_diff < 0:
-            status = "overdue"    # просрочен (до 30 дней назад)
+            status = "overdue"
         elif days_diff == 0:
             status = "today"
         elif days_diff <= 14:
-            status = "soon"       # скоро (в ближайшие 2 недели)
+            status = "soon"
         else:
-            status = "upcoming"   # предстоит
+            status = "upcoming"
 
         result.append({
             "name": name,
+            "months": months,
             "date": visit_date.strftime("%d.%m.%Y"),
             "days_diff": days_diff,
             "status": status,
@@ -66,12 +73,11 @@ def get_checkup_dates(birthdate_str: str):
 
 
 async def show_checkups_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает меню выбора ребёнка для осмотров."""
     query = update.callback_query
     user_id = update.effective_user.id
     children = db.get_children(user_id)
-
     is_cb = query is not None
+
     if is_cb:
         await query.answer()
 
@@ -87,7 +93,6 @@ async def show_checkups_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if len(children) == 1:
-        # Сразу показываем осмотры для единственного ребёнка
         context.user_data["checkup_child_id"] = children[0]["id"]
         if is_cb:
             await _show_checkups_for_child(query, children[0])
@@ -125,11 +130,12 @@ async def show_checkups_for_child_cb(update: Update, context: ContextTypes.DEFAU
 
 
 async def _show_checkups_for_child(query, ch):
-    checkups = get_checkup_dates(ch["birthdate"])
+    child_id = ch["id"]
+    done_months = db.get_checkups_done(child_id)
+    checkups = get_checkup_dates(ch["birthdate"], done_months)
     emoji = "👧" if ch["gender"] == "girl" else "👦"
     age = age_str(ch["birthdate"])
 
-    # Находим следующий предстоящий осмотр
     next_visit = None
     for c in checkups:
         if c["status"] in ("soon", "upcoming", "today"):
@@ -139,26 +145,22 @@ async def _show_checkups_for_child(query, ch):
     lines = []
     shown = 0
     for c in checkups:
-        if c["status"] == "past":
-            continue  # скрываем давно прошедшие
-        if c["status"] == "past":
-            icon = "✓"
+        if c["status"] in ("past", "done") and c["status"] != "done":
+            continue
+        if c["status"] == "done":
+            icon = "✅"
+            diff_str = "пройден"
         elif c["status"] == "overdue":
             icon = "⚠️"
-        elif c["status"] == "today":
-            icon = "🔴"
-        elif c["status"] == "soon":
-            icon = "🟡"
-        else:
-            icon = "⚪"
-
-        if c["status"] == "overdue":
             diff_str = f"просрочен на {abs(c['days_diff'])} дн."
         elif c["status"] == "today":
+            icon = "🔴"
             diff_str = "сегодня!"
         elif c["status"] == "soon":
+            icon = "🟡"
             diff_str = f"через {c['days_diff']} дн."
         else:
+            icon = "⚪"
             diff_str = c["date"]
 
         lines.append(f"{icon} {c['name']} — {diff_str}")
@@ -184,7 +186,8 @@ async def _show_checkups_for_child(query, ch):
         text += "_Все плановые осмотры пройдены!_ ✅"
 
     keyboard = [
-        [InlineKeyboardButton("📋 Все осмотры", callback_data=f"checkup_all:{ch['id']}")],
+        [InlineKeyboardButton("📋 Все осмотры", callback_data=f"checkup_all:{child_id}")],
+        [InlineKeyboardButton("✅ Отметить пройденным", callback_data=f"checkup_mark_list:{child_id}")],
         [InlineKeyboardButton("◀️ Назад", callback_data="my_child")],
     ]
     await query.edit_message_text(text, parse_mode="Markdown",
@@ -192,7 +195,9 @@ async def _show_checkups_for_child(query, ch):
 
 
 async def _show_checkups_msg(message, ch):
-    checkups = get_checkup_dates(ch["birthdate"])
+    child_id = ch["id"]
+    done_months = db.get_checkups_done(child_id)
+    checkups = get_checkup_dates(ch["birthdate"], done_months)
     emoji = "👧" if ch["gender"] == "girl" else "👦"
     age = age_str(ch["birthdate"])
 
@@ -214,10 +219,12 @@ async def _show_checkups_msg(message, ch):
             text += f"📍 *Следующий осмотр:* {next_visit['name']}\n"
             text += f"    📅 {next_visit['date']}\n\n"
 
-    upcoming = [c for c in checkups if c["status"] != "past"][:6]
+    upcoming = [c for c in checkups if c["status"] not in ("past",)][:6]
     lines = []
     for c in upcoming:
-        if c["status"] == "overdue":
+        if c["status"] == "done":
+            icon, diff = "✅", "пройден"
+        elif c["status"] == "overdue":
             icon, diff = "⚠️", f"просрочен на {abs(c['days_diff'])} дн."
         elif c["status"] == "today":
             icon, diff = "🔴", "сегодня!"
@@ -232,6 +239,7 @@ async def _show_checkups_msg(message, ch):
 
     keyboard = [
         [InlineKeyboardButton("📋 Все осмотры", callback_data=f"checkup_all:{ch['id']}")],
+        [InlineKeyboardButton("✅ Отметить пройденным", callback_data=f"checkup_mark_list:{ch['id']}")],
         [InlineKeyboardButton("◀️ Назад", callback_data="my_child")],
     ]
     await message.reply_text(text, parse_mode="Markdown",
@@ -239,7 +247,6 @@ async def _show_checkups_msg(message, ch):
 
 
 async def show_all_checkups_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает полный список всех осмотров."""
     query = update.callback_query
     await query.answer()
     child_id = int(query.data.split(":")[1])
@@ -249,12 +256,15 @@ async def show_all_checkups_cb(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("Ребёнок не найден.")
         return
 
-    checkups = get_checkup_dates(ch["birthdate"])
+    done_months = db.get_checkups_done(child_id)
+    checkups = get_checkup_dates(ch["birthdate"], done_months)
     emoji = "👧" if ch["gender"] == "girl" else "👦"
 
     lines = []
     for c in checkups:
-        if c["status"] == "past":
+        if c["status"] == "done":
+            icon = "✅"
+        elif c["status"] == "past":
             icon = "✓"
         elif c["status"] == "overdue":
             icon = "⚠️"
@@ -267,16 +277,89 @@ async def show_all_checkups_cb(update: Update, context: ContextTypes.DEFAULT_TYP
         lines.append(f"{icon} {c['name']} — {c['date']}")
 
     text = f"📋 *Все плановые осмотры*\n{emoji} {ch['name']}\n\n" + "\n".join(lines)
-    text += "\n\n✓ пройден  ⚠️ просрочен  🟡 скоро  ⚪ предстоит"
+    text += "\n\n✅ пройден  ⚠️ просрочен  🟡 скоро  ⚪ предстоит"
 
-    keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=f"checkup_child:{child_id}")]]
+    keyboard = [
+        [InlineKeyboardButton("✅ Отметить пройденным", callback_data=f"checkup_mark_list:{child_id}")],
+        [InlineKeyboardButton("◀️ Назад", callback_data=f"checkup_child:{child_id}")],
+    ]
     await query.edit_message_text(text, parse_mode="Markdown",
                                   reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+async def show_mark_checkup_list_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Список осмотров которые можно отметить пройденными."""
+    query = update.callback_query
+    await query.answer()
+    child_id = int(query.data.split(":")[1])
+    user_id = update.effective_user.id
+    ch = db.get_child(child_id, user_id)
+    if not ch:
+        await query.edit_message_text("Ребёнок не найден.")
+        return
+
+    done_months = db.get_checkups_done(child_id)
+    checkups = get_checkup_dates(ch["birthdate"], done_months)
+
+    # Показываем только те что не отмечены как done и не "past"
+    markable = [c for c in checkups if c["status"] != "done"]
+
+    if not markable:
+        keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=f"checkup_child:{child_id}")]]
+        await query.edit_message_text(
+            "✅ Все осмотры уже отмечены как пройденные!",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    keyboard = []
+    for c in markable:
+        if c["status"] == "overdue":
+            label = f"⚠️ {c['name']}"
+        elif c["status"] == "today":
+            label = f"🔴 {c['name']}"
+        elif c["status"] == "soon":
+            label = f"🟡 {c['name']}"
+        elif c["status"] == "past":
+            label = f"✓ {c['name']}"
+        else:
+            label = f"⚪ {c['name']}"
+        keyboard.append([InlineKeyboardButton(
+            label, callback_data=f"checkup_mark:{child_id}:{c['months']}"
+        )])
+    keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data=f"checkup_child:{child_id}")])
+
+    await query.edit_message_text(
+        "✅ *Отметить осмотр пройденным*\n\nВыберите осмотр:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def mark_checkup_done_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отмечает осмотр как пройденный."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":")
+    child_id = int(parts[1])
+    months = int(parts[2])
+    user_id = update.effective_user.id
+
+    db.mark_checkup_done(child_id, months)
+
+    # Находим название осмотра
+    name = next((n for n, m in CHECKUP_SCHEDULE if m == months), f"{months} мес.")
+
+    keyboard = [[InlineKeyboardButton("🏥 К осмотрам", callback_data=f"checkup_child:{child_id}")]]
+    await query.edit_message_text(
+        f"✅ Осмотр отмечен как пройденный!\n\n*{name}*",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def send_checkup_reminders(app):
-    """Планировщик: уведомляет о осмотрах за 3 дня и в день осмотра."""
-    from datetime import date
+    """Планировщик: уведомляет об осмотрах за 3 дня и в день осмотра."""
     today = date.today()
 
     users_children = {}
@@ -288,9 +371,12 @@ async def send_checkup_reminders(app):
 
     for user_id, children in users_children.items():
         for ch in children:
-            checkups = get_checkup_dates(ch["birthdate"])
+            done_months = db.get_checkups_done(ch["id"])
+            checkups = get_checkup_dates(ch["birthdate"], done_months)
             emoji = "👧" if ch["gender"] == "girl" else "👦"
             for c in checkups:
+                if c["status"] == "done":
+                    continue
                 if c["status"] == "today":
                     family_ids = db.get_family_user_ids(user_id)
                     for uid in family_ids:
