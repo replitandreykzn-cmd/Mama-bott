@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -192,9 +192,8 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == BTN_MEDICAL:
         await show_medical_info_menu(update, context)
     elif text == BTN_CHAT:
-        chat_url = os.environ.get("CHAT_URL", "")
-        if chat_url:
-            keyboard = [[InlineKeyboardButton("💬 Открыть чат мам", url=chat_url)]]
+        if CHAT_URL:
+            keyboard = [[InlineKeyboardButton("💬 Открыть чат мам", url=CHAT_URL)]]
             await update.message.reply_text(
                 "💬 *Чат мам МамаБота*\n\nОбщайтесь, задавайте вопросы, делитесь опытом!",
                 parse_mode="Markdown",
