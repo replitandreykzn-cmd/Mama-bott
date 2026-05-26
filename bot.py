@@ -224,15 +224,18 @@ async def check_reminders(app: Application):
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     due = db.get_due_reminders(now)
     for r in due:
-        try:
-            await app.bot.send_message(
-                chat_id=r["user_id"],
-                text=f"🔔 *Напоминание!*\n\n{r['title']}",
-                parse_mode="Markdown"
-            )
-            db.deactivate_reminder(r["id"])
-        except Exception as e:
-            logger.error(f"Reminder {r['id']} failed: {e}")
+        # Отправляем всем членам семьи
+        family_ids = db.get_family_user_ids(r["user_id"])
+        for uid in family_ids:
+            try:
+                await app.bot.send_message(
+                    chat_id=uid,
+                    text=f"🔔 *Напоминание!*\n\n{r['title']}",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Reminder {r['id']} to {uid} failed: {e}")
+        db.deactivate_reminder(r["id"])
 
 
 async def check_medications(app: Application):
@@ -261,15 +264,17 @@ async def check_medications(app: Application):
 
         if now >= next_at:
             dose_str = f" · {m['dose']}" if m["dose"] else ""
-            try:
-                await app.bot.send_message(
-                    chat_id=m["user_id"],
-                    text=f"💊 *Время принять лекарство!*\n\n{m['name']}{dose_str}",
-                    parse_mode="Markdown"
-                )
-                db.update_medication_next_reminder(m["id"], m["interval_hours"])
-            except Exception as e:
-                logger.error(f"Med reminder {m['id']} failed: {e}")
+            family_ids = db.get_family_user_ids(m["user_id"])
+            for uid in family_ids:
+                try:
+                    await app.bot.send_message(
+                        chat_id=uid,
+                        text=f"💊 *Время принять лекарство!*\n\n{m['name']}{dose_str}",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Med reminder {m['id']} to {uid} failed: {e}")
+            db.update_medication_next_reminder(m["id"], m["interval_hours"])
 
 
 async def send_weekly_vaccine_reminders(app: Application):
@@ -313,10 +318,12 @@ async def send_weekly_vaccine_reminders(app: Application):
 
         if messages:
             text = "💉 *Напоминание о прививках*\n\n" + "\n\n".join(messages)
-            try:
-                await app.bot.send_message(chat_id=user_id, text=text, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Weekly vaccine reminder failed for {user_id}: {e}")
+            family_ids = db.get_family_user_ids(user_id)
+            for uid in family_ids:
+                try:
+                    await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+                except Exception as e:
+                    logger.error(f"Weekly vaccine reminder failed for {uid}: {e}")
 
 
 # ── Точка входа ──────────────────────────────────────────────────────────────
