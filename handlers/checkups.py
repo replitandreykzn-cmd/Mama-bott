@@ -292,29 +292,33 @@ async def send_checkup_reminders(app):
             emoji = "👧" if ch["gender"] == "girl" else "👦"
             for c in checkups:
                 if c["status"] == "today":
-                    try:
-                        await app.bot.send_message(
-                            chat_id=user_id,
-                            text=(
-                                f"🏥 *Сегодня плановый осмотр!*\n\n"
-                                f"{emoji} {ch['name']} — *{c['name']}*\n\n"
-                                f"Не забудьте взять полис и карту ребёнка!"
-                            ),
-                            parse_mode="Markdown"
-                        )
-                    except Exception:
-                        pass
+                    family_ids = db.get_family_user_ids(user_id)
+                    for uid in family_ids:
+                        try:
+                            await app.bot.send_message(
+                                chat_id=uid,
+                                text=(
+                                    f"🏥 *Сегодня плановый осмотр!*\n\n"
+                                    f"{emoji} {ch['name']} — *{c['name']}*\n\n"
+                                    f"Не забудьте взять полис и карту ребёнка!"
+                                ),
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            pass
                 elif c["days_diff"] == 3:
-                    try:
-                        await app.bot.send_message(
-                            chat_id=user_id,
-                            text=(
-                                f"🏥 *Через 3 дня плановый осмотр*\n\n"
-                                f"{emoji} {ch['name']} — *{c['name']}*\n"
-                                f"📅 {c['date']}\n\n"
-                                f"Запишитесь к педиатру заранее!"
-                            ),
-                            parse_mode="Markdown"
-                        )
-                    except Exception:
-                        pass
+                    family_ids = db.get_family_user_ids(user_id)
+                    for uid in family_ids:
+                        try:
+                            await app.bot.send_message(
+                                chat_id=uid,
+                                text=(
+                                    f"🏥 *Через 3 дня плановый осмотр*\n\n"
+                                    f"{emoji} {ch['name']} — *{c['name']}*\n"
+                                    f"📅 {c['date']}\n\n"
+                                    f"Запишитесь к педиатру заранее!"
+                                ),
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            pass
