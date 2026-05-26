@@ -435,6 +435,34 @@ def get_family_owner(member_user_id):
 
 # ── Дети ─────────────────────────────────────────────────────────────────────
 
+
+def get_family_user_ids(user_id):
+    """Возвращает всех кому нужно слать уведомления:
+    если user_id — владелец, возвращает его + всех членов семьи.
+    Если user_id — член семьи, возвращает владельца + всех членов."""
+    conn = get_conn()
+    c = conn.cursor()
+
+    # Проверяем — может user_id сам является членом чьей-то семьи
+    c.execute(_q("SELECT owner_user_id FROM family_members WHERE member_user_id=?"), (user_id,))
+    owner_row = _fetchone(c)
+
+    if owner_row:
+        owner_id = owner_row["owner_user_id"]
+    else:
+        owner_id = user_id
+
+    # Берём всех членов семьи владельца
+    c.execute(_q("SELECT member_user_id FROM family_members WHERE owner_user_id=?"), (owner_id,))
+    members = _fetchall(c)
+    conn.close()
+
+    ids = set([owner_id])
+    for m in members:
+        ids.add(m["member_user_id"])
+    return list(ids)
+
+
 def get_children(user_id):
     owner = get_family_owner(user_id)
     target = owner if owner else user_id
