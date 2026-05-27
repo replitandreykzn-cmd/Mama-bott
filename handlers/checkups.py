@@ -1,6 +1,7 @@
 """
 Плановые осмотры педиатра по возрасту ребёнка (приказ МЗ РФ №514н).
 """
+import asyncio
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -379,7 +380,7 @@ async def send_checkup_reminders(app):
                     continue
                 if c["status"] == "today":
                     family_ids = db.get_family_user_ids(user_id)
-                    for uid in family_ids:
+                    for i_uid, uid in enumerate(family_ids):
                         try:
                             await app.bot.send_message(
                                 chat_id=uid,
@@ -392,9 +393,11 @@ async def send_checkup_reminders(app):
                             )
                         except Exception:
                             pass
+                        if (i_uid + 1) % 25 == 0:
+                            await asyncio.sleep(1)
                 elif c["days_diff"] == 3:
                     family_ids = db.get_family_user_ids(user_id)
-                    for uid in family_ids:
+                    for i_uid, uid in enumerate(family_ids):
                         try:
                             await app.bot.send_message(
                                 chat_id=uid,
@@ -408,3 +411,5 @@ async def send_checkup_reminders(app):
                             )
                         except Exception:
                             pass
+                        if (i_uid + 1) % 25 == 0:
+                            await asyncio.sleep(1)
