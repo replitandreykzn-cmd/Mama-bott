@@ -159,7 +159,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if args and args[0].startswith("ref"):
         import asyncio
-        asyncio.create_task(handle_referral_start(user.id, args[0], context.application))
+
+        async def _safe_referral():
+            try:
+                await handle_referral_start(user.id, args[0], context.application)
+            except Exception as e:
+                logger.error(f"Referral error for user {user.id}: {e}")
+
+        asyncio.create_task(_safe_referral())
 
     if is_new:
         until = db.activate_trial(user.id)
@@ -168,6 +175,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Привет, {name}! 🌸\n\n"
             f"Добро пожаловать в *МамаБот* — помощник для мам!\n\n"
             f"🎁 *Активирован бесплатный период на {TRIAL_DAYS} дней* (до {until_str}).\n\n"
+            f"💡 Есть раздел *🤰 Беременность* — если ждёте малыша, загляните туда!\n\n"
             f"Выберите раздел в меню ниже 👇"
         )
         await update.message.reply_text(
@@ -270,12 +278,12 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_ai_menu(update, context)
     elif text == BTN_PAGE2:
         await update.message.reply_text(
-            "👇",
+            "📋 Дополнительные разделы:",
             reply_markup=main_reply_keyboard(2)
         )
     elif text == BTN_PAGE1:
         await update.message.reply_text(
-            "👇",
+            "📋 Основные разделы:",
             reply_markup=main_reply_keyboard(1)
         )
 
