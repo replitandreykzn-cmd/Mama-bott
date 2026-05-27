@@ -7,7 +7,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 import database as db
-from handlers.child import age_str
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +27,29 @@ for path in POSSIBLE_PATHS:
 
 if not FONT_PATH:
     logger.error("КРИТИЧЕСКАЯ ОШИБКА: Файл шрифта DejaVuSans.ttf не найден!")
+
+# ── Локальная функция расчета возраста (чтобы избежать кругового импорта) ────
+def _get_age_string(birthdate_str: str) -> str:
+    try:
+        bd = datetime.strptime(birthdate_str, "%d.%m.%Y").date()
+    except Exception:
+        try:
+            bd = date.fromisoformat(birthdate_str)
+        except Exception:
+            return ""
+    today = date.today()
+    months = (today.year - bd.year) * 12 + today.month - bd.month
+    if today.day < bd.day:
+        months -= 1
+    if months < 0:
+        months = 0
+    if months < 12:
+        return f"{months} мес."
+    years = months // 12
+    rem = months % 12
+    if rem == 0:
+        return f"{years} лет"
+    return f"{years} л. {rem} мес."
 
 # ── Цвета ─────────────────────────────────────────────────────────────────────
 C_ACCENT       = (99, 102, 241)
@@ -94,7 +116,7 @@ def generate_child_pdf(child, growth_records, vaccinations, illnesses, medicatio
     pdf.set_text_color(*C_DARK)
     pdf.set_x(15)
     gender_txt = "Девочка" if child["gender"] == "girl" else "Мальчик"
-    pdf.cell(0, 6, f"Пол: {gender_txt}   |   Дата рождения: {child['birthdate']} ({age_str(child['birthdate'])})", 0, 1)
+    pdf.cell(0, 6, f"Пол: {gender_txt}   |   Дата рождения: {child['birthdate']} ({_get_age_string(child['birthdate'])})", 0, 1)
     
     if medical_info:
         bg = medical_info.get("blood_group", "—")
