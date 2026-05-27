@@ -230,6 +230,14 @@ def init_db():
     """)
 
     c.execute(f"""
+        CREATE TABLE IF NOT EXISTS pregnancy (
+            user_id BIGINT PRIMARY KEY,
+            pdr TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS referrals (
             id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
             referrer_user_id BIGINT NOT NULL,
@@ -291,6 +299,14 @@ def init_db():
             checkup_months INTEGER NOT NULL,
             done_date TEXT NOT NULL,
             UNIQUE(child_id, checkup_months)
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS pregnancy (
+            user_id BIGINT PRIMARY KEY,
+            pdr TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -1060,5 +1076,42 @@ def unmark_checkup_done(child_id, checkup_months):
     c = conn.cursor()
     c.execute(_q("DELETE FROM checkups_done WHERE child_id=? AND checkup_months=?"),
               (child_id, checkup_months))
+    conn.commit()
+    conn.close()
+
+
+# ── Беременность ──────────────────────────────────────────────────────────────
+
+def get_pregnancy_pdr(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT pdr FROM pregnancy WHERE user_id=?"), (user_id,))
+    row = _fetchone(c)
+    conn.close()
+    return row["pdr"] if row else None
+
+
+def set_pregnancy_pdr(user_id, pdr):
+    conn = get_conn()
+    c = conn.cursor()
+    if _is_pg():
+        c.execute(
+            "INSERT INTO pregnancy (user_id, pdr) VALUES (%s,%s) "
+            "ON CONFLICT (user_id) DO UPDATE SET pdr=%s",
+            (user_id, pdr, pdr)
+        )
+    else:
+        c.execute(
+            "INSERT OR REPLACE INTO pregnancy (user_id, pdr) VALUES (?,?)",
+            (user_id, pdr)
+        )
+    conn.commit()
+    conn.close()
+
+
+def delete_pregnancy(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("DELETE FROM pregnancy WHERE user_id=?"), (user_id,))
     conn.commit()
     conn.close()
