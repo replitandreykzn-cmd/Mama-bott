@@ -28,7 +28,8 @@ for path in POSSIBLE_PATHS:
 if not FONT_PATH:
     logger.error("КРИТИЧЕСКАЯ ОШИБКА: Файл шрифта DejaVuSans.ttf не найден!")
 
-# ── Локальная функция расчета возраста (чтобы избежать кругового импорта) ────
+# ── Локальные безопасные функции, чтобы избежать циклического импорта ───────
+
 def _get_age_string(birthdate_str: str) -> str:
     try:
         bd = datetime.strptime(birthdate_str, "%d.%m.%Y").date()
@@ -50,6 +51,39 @@ def _get_age_string(birthdate_str: str) -> str:
     if rem == 0:
         return f"{years} лет"
     return f"{years} л. {rem} мес."
+
+def _local_get_medical_info(child_id):
+    try:
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute(db._q("SELECT * FROM medical_info WHERE child_id=?"), (child_id,))
+        row = db._fetchone(c)
+        conn.close()
+        return row if row else {}
+    except Exception:
+        return {}
+
+def _local_get_allergies(child_id):
+    try:
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute(db._q("SELECT * FROM allergies WHERE child_id=?"), (child_id,))
+        rows = db._fetchall(c)
+        conn.close()
+        return rows if rows else []
+    except Exception:
+        return []
+
+def _local_get_contraindications(child_id):
+    try:
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute(db._q("SELECT * FROM contraindications WHERE child_id=?"), (child_id,))
+        rows = db._fetchall(c)
+        conn.close()
+        return rows if rows else []
+    except Exception:
+        return []
 
 # ── Цвета ─────────────────────────────────────────────────────────────────────
 C_ACCENT       = (99, 102, 241)
@@ -261,9 +295,9 @@ async def _do_export(query, context, child_id: int, user_id: int):
     vaccines          = db.get_vaccinations(child_id, user_id)
     illnesses         = db.get_illnesses(child_id, active_only=False, limit=20)
     medications       = db.get_medications(child_id, active_only=False)
-    medical_info      = db.get_medical_info(child_id)
-    allergies         = db.get_allergies(child_id)
-    contraindications = db.get_contraindications(child_id)
+    medical_info      = _local_get_medical_info(child_id)
+    allergies         = _local_get_allergies(child_id)
+    contraindications = _local_get_contraindications(child_id)
 
     try:
         pdf_bytes = generate_child_pdf(ch, growth, vaccines, illnesses, medications, medical_info, allergies, contraindications)
