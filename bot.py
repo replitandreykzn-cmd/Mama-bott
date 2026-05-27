@@ -76,6 +76,11 @@ from handlers.medical_info import (
     MI_CONTRA_NAME,
 )
 from handlers.referral import show_referral_menu, handle_referral_start
+from handlers.ai_assistant import (
+    show_ai_menu, start_analyze_doc, got_document_for_analysis,
+    show_ai_advice, cancel_ai,
+    AI_WAIT_DOC,
+)
 from handlers.onboarding import (
     start_onboarding, onboarding_step_cb, finish_onboarding_cb,
 )
@@ -108,6 +113,7 @@ BTN_EXCEL        = "📊 Excel"
 BTN_MEDICAL      = "🩺 Медкарта"
 BTN_CHAT         = "💬 Чат мам"
 BTN_PREGNANCY    = "🤰 Беременность"
+BTN_AI           = "🤖 ИИ-ассистент"
 BTN_PAGE2        = "➡️ Ещё"
 BTN_PAGE1        = "⬅️ Назад"
 
@@ -117,7 +123,7 @@ MENU_BUTTONS = [
     BTN_CHILD, BTN_GROWTH, BTN_VACCINES, BTN_REMINDERS,
     BTN_MEDICATIONS, BTN_ILLNESS, BTN_SUBSCRIPTION, BTN_PDF,
     BTN_CHECKUPS, BTN_EXCEL, BTN_MEDICAL, BTN_CHAT,
-    BTN_PREGNANCY, BTN_PAGE2, BTN_PAGE1,
+    BTN_PREGNANCY, BTN_AI, BTN_PAGE2, BTN_PAGE1,
 ]
 
 # Страница 1 — основные функции
@@ -133,7 +139,7 @@ PAGE2_KEYBOARD = [
     [BTN_MEDICAL,     BTN_PDF],
     [BTN_EXCEL,       BTN_SUBSCRIPTION],
     [BTN_PREGNANCY,   BTN_CHAT],
-    [BTN_PAGE1,       BTN_PAGE1],
+    [BTN_AI,          BTN_PAGE1],
 ]
 
 
@@ -181,6 +187,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает пользователю его Telegram ID — нажимаемый для копирования."""
+    user = update.effective_user
+    user_id = user.id
+    await update.message.reply_text(
+        f"🪪 *Ваш Telegram ID:*\n\n`{user_id}`\n\n"
+        f"_Нажмите на цифры выше — они скопируются в буфер обмена._",
+        parse_mode="Markdown"
+    )
+
+
 # ── Роутинг кнопок клавиатуры ────────────────────────────────────────────────
 
 async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -220,6 +237,8 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Чат скоро будет добавлен!")
     elif text == BTN_PREGNANCY:
         await show_pregnancy_menu(update, context)
+    elif text == BTN_AI:
+        await show_ai_menu(update, context)
     elif text == BTN_PAGE2:
         await update.message.reply_text(
             "📋 Дополнительные функции:",
@@ -485,8 +504,21 @@ def main():
         allow_reentry=True,
     )
 
+    analyze_doc_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_analyze_doc, pattern="^ai_analyze_doc$")],
+        states={
+            AI_WAIT_DOC: [
+                MessageHandler(filters.PHOTO, got_document_for_analysis),
+                MessageHandler(filters.Document.ALL, got_document_for_analysis),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_ai), MessageHandler(kb_filter, route_keyboard)],
+        allow_reentry=True,
+    )
+
     # ── Команды ──────────────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("start",     start))
+    app.add_handler(CommandHandler("id",        cmd_id))
     app.add_handler(CommandHandler("grant",     cmd_grant))
     app.add_handler(CommandHandler("revoke",    cmd_revoke))
     app.add_handler(CommandHandler("stats",     cmd_stats))
@@ -505,6 +537,7 @@ def main():
     app.add_handler(policy_conv)
     app.add_handler(allergy_conv)
     app.add_handler(contra_conv)
+    app.add_handler(analyze_doc_conv)
 
     # ── Кнопки клавиатуры ────────────────────────────────────────────────────
     app.add_handler(MessageHandler(kb_filter, route_keyboard))
@@ -586,6 +619,10 @@ def main():
     app.add_handler(CallbackQueryHandler(show_illness_child_cb, pattern="^ill_child:"))
     app.add_handler(CallbackQueryHandler(end_illness_cb,        pattern="^ill_end:"))
     app.add_handler(CallbackQueryHandler(show_illness_history,  pattern="^ill_history:"))
+
+    # ── ИИ-ассистент ──────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(show_ai_menu,    pattern="^ai_menu$"))
+    app.add_handler(CallbackQueryHandler(show_ai_advice,  pattern="^ai_advice:"))
 
     # ── Планировщик ──────────────────────────────────────────────────────────
     scheduler = AsyncIOScheduler(timezone=TZ)
