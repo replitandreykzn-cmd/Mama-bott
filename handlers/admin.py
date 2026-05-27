@@ -1,8 +1,18 @@
 import os
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
 import database as db
+
+
+async def _safe_broadcast(bot, user_id, text, parse_mode="Markdown"):
+    """Отправляет сообщение с защитой от превышения лимитов Telegram (30 сообщ/сек)."""
+    try:
+        await bot.send_message(chat_id=user_id, text=text, parse_mode=parse_mode)
+        return True
+    except Exception:
+        return False
 
 OWNER_ID = int(os.environ.get("OWNER_TG_ID", "0"))
 
@@ -149,16 +159,18 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     failed = 0
     status_msg = await update.message.reply_text(f"📤 Отправляю {len(users)} пользователям...")
 
-    for r in users:
-        try:
-            await context.bot.send_message(
-                chat_id=r["user_id"],
-                text=f"📢 *Сообщение от МамаБота:*\n\n{text}",
-                parse_mode="Markdown"
-            )
+    for i, r in enumerate(users):
+        ok = await _safe_broadcast(
+            context.bot, r["user_id"],
+            f"📢 *Сообщение от МамаБота:*\n\n{text}"
+        )
+        if ok:
             sent += 1
-        except Exception:
+        else:
             failed += 1
+        # Пауза каждые 25 сообщений чтобы не превысить лимит Telegram
+        if (i + 1) % 25 == 0:
+            await asyncio.sleep(1)
 
     await status_msg.edit_text(
         f"✅ Рассылка завершена!\n\n"
