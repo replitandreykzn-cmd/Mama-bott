@@ -1,5 +1,5 @@
 """
-ИИ-ассистент МамаБота:
+ИИ-ассистент МамаБота на Google Gemini:
 1. Анализ фото/PDF медицинских документов — объясняет простым языком
 2. Персональные советы по возрасту ребёнка
 """
@@ -12,38 +12,44 @@ from telegram.ext import ContextTypes, ConversationHandler
 import database as db
 from handlers.child import age_str
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-opus-4-5"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 # Состояния диалога анализа документа
 AI_WAIT_DOC = range(90, 91)
 
 
-# ── Вспомогательная функция запроса к Claude ────────────────────────────────
+# ── Вспомогательная функция запроса к Gemini ────────────────────────────────
 
-async def _ask_claude(messages: list, system: str, max_tokens: int = 1500) -> str:
-    """Отправляет запрос к Claude API и возвращает текст ответа."""
-    if not ANTHROPIC_API_KEY:
-        return "⚠️ ИИ-функции не настроены. Администратор должен добавить ANTHROPIC_API_KEY."
+async def _ask_gemini(parts: list, system: str, max_tokens: int = 1500) -> str:
+    """Отправляет запрос к Gemini API и возвращает текст ответа."""
+    if not GEMINI_API_KEY:
+        return "⚠️ ИИ-функции не настроены. Администратор должен добавить GEMINI_API_KEY в переменные окружения Railway."
 
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
+    url = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
+
     payload = {
-        "model": MODEL,
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": messages,
+        "system_instruction": {
+            "parts": [{"text": system}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": parts
+            }
+        ],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": 0.7,
+        }
     }
+
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(ANTHROPIC_URL, headers=headers, json=payload)
+            resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return data["content"][0]["text"]
+            return data["candidates"][0]["content"]["parts"][0]["text"]
     except httpx.TimeoutException:
         return "⏱ ИИ не успел ответить (слишком долго). Попробуйте ещё раз."
     except Exception as e:
@@ -126,11 +132,11 @@ async def start_analyze_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def got_document_for_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получили фото или PDF — анализируем через Claude."""
+    """Получили фото или PDF — анализируем через Gemini."""
     user_id = update.effective_user.id
     msg = update.message
 
-    # Получаем имя ребёнка для контекста (если есть)
+    # Получаем контекст ребёнка если есть
     children = db.get_children(user_id)
     child_context = ""
     if children:
@@ -152,27 +158,21 @@ async def got_document_for_analysis(update: Update, context: ContextTypes.DEFAUL
     thinking_msg = await msg.reply_text("🔍 Изучаю документ, подождите немного...")
 
     try:
-        # Определяем тип: фото или PDF
+        parts = []
+
         if msg.photo:
-            # Телеграм присылает несколько размеров, берём самый большой
+            # Берём фото наибольшего размера
             photo = msg.photo[-1]
             file = await context.bot.get_file(photo.file_id)
             file_bytes = await file.download_as_bytearray()
             b64 = base64.standard_b64encode(bytes(file_bytes)).decode()
-            content = [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": b64,
-                    }
-                },
-                {
-                    "type": "text",
-                    "text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": b64
                 }
-            ]
+            })
+            parts.append({"text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."})
 
         elif msg.document:
             doc = msg.document
@@ -182,62 +182,50 @@ async def got_document_for_analysis(update: Update, context: ContextTypes.DEFAUL
                 file = await context.bot.get_file(doc.file_id)
                 file_bytes = await file.download_as_bytearray()
                 b64 = base64.standard_b64encode(bytes(file_bytes)).decode()
-                content = [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": b64,
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "application/pdf",
+                        "data": b64
                     }
-                ]
+                })
+                parts.append({"text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."})
+
             elif mime.startswith("image/"):
                 file = await context.bot.get_file(doc.file_id)
                 file_bytes = await file.download_as_bytearray()
                 b64 = base64.standard_b64encode(bytes(file_bytes)).decode()
-                content = [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": mime,
-                            "data": b64,
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."
+                parts.append({
+                    "inline_data": {
+                        "mime_type": mime,
+                        "data": b64
                     }
-                ]
+                })
+                parts.append({"text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."})
+
             else:
                 await thinking_msg.edit_text(
                     "⚠️ Поддерживаются только фото и PDF-файлы. Пришли фото или PDF-документ."
                 )
                 return AI_WAIT_DOC
-
         else:
             await thinking_msg.edit_text(
                 "⚠️ Пришли фото или PDF-файл с медицинским документом."
             )
             return AI_WAIT_DOC
 
-        answer = await _ask_claude(
-            messages=[{"role": "user", "content": content}],
-            system=system_prompt,
-            max_tokens=2000,
-        )
+        answer = await _ask_gemini(parts=parts, system=system_prompt, max_tokens=2000)
 
         keyboard = [
             [InlineKeyboardButton("🔬 Ещё один документ", callback_data="ai_analyze_doc")],
             [InlineKeyboardButton("◀️ Меню ИИ", callback_data="ai_menu")],
         ]
+
+        full_text = f"🔬 *Разбор документа:*\n\n{answer}"
+        if len(full_text) > 4000:
+            full_text = full_text[:3990] + "..."
+
         await thinking_msg.edit_text(
-            f"🔬 *Разбор документа:*\n\n{answer}",
+            full_text,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -273,7 +261,7 @@ async def show_ai_advice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emoji = "👧" if ch["gender"] == "girl" else "👦"
     gender_word = "девочка" if ch["gender"] == "girl" else "мальчик"
 
-    # Собираем дополнительный контекст из базы
+    # Дополнительный контекст из базы
     allergies = db.get_allergies(child_id)
     allergy_names = [a["name"] for a in allergies] if allergies else []
     allergy_context = f"Известные аллергии: {', '.join(allergy_names)}." if allergy_names else ""
@@ -314,8 +302,8 @@ async def show_ai_advice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-    answer = await _ask_claude(
-        messages=[{"role": "user", "content": user_prompt}],
+    answer = await _ask_gemini(
+        parts=[{"text": user_prompt}],
         system=system_prompt,
         max_tokens=2000,
     )
@@ -325,7 +313,6 @@ async def show_ai_advice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("◀️ Меню ИИ", callback_data="ai_menu")],
     ]
 
-    # Telegram ограничивает сообщения 4096 символами
     full_text = f"{emoji} *Советы для {ch['name']} ({age}):*\n\n{answer}"
     if len(full_text) > 4000:
         full_text = full_text[:3990] + "..."
