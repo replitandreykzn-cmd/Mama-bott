@@ -5,6 +5,7 @@
 """
 import os
 import base64
+import asyncio
 import httpx
 from datetime import date, datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -22,9 +23,12 @@ AI_WAIT_DOC = range(90, 91)
 # ── Вспомогательная функция запроса к Gemini ────────────────────────────────
 
 async def _ask_gemini(parts: list, system: str, max_tokens: int = 1500) -> str:
-    """Отправляет запрос к Gemini API и возвращает текст ответа."""
+    """Отправляет запрос к Gemini API, при ошибке 429 делает 2 повтора."""
     if not GEMINI_API_KEY:
-        return "⚠️ ИИ-функции не настроены. Администратор должен добавить GEMINI_API_KEY в переменные окружения Railway."
+        return (
+            "⚠️ ИИ-функции не настроены.\n"
+            "Администратор должен добавить GEMINI_API_KEY в переменные окружения Railway."
+        )
 
     url = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
 
@@ -44,16 +48,48 @@ async def _ask_gemini(parts: list, system: str, max_tokens: int = 1500) -> str:
         }
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-    except httpx.TimeoutException:
-        return "⏱ ИИ не успел ответить (слишком долго). Попробуйте ещё раз."
-    except Exception as e:
-        return f"❌ Ошибка при обращении к ИИ: {e}"
+    last_error = None
+    for attempt in range(3):  # 3 попытки
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(url, json=payload)
+
+                if resp.status_code == 429:
+                    # Подождать и попробовать снова
+                    wait = 5 * (attempt + 1)  # 5с, 10с, 15с
+                    await asyncio.sleep(wait)
+                    last_error = "429"
+                    continue
+
+                resp.raise_for_status()
+                data = resp.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+
+        except httpx.TimeoutException:
+            last_error = "timeout"
+            await asyncio.sleep(3)
+            continue
+        except Exception as e:
+            # Убираем ключ из текста ошибки перед показом
+            err_text = str(e)
+            if GEMINI_API_KEY and GEMINI_API_KEY in err_text:
+                err_text = err_text.replace(GEMINI_API_KEY, "***")
+            last_error = err_text
+            break
+
+    # Все попытки исчерпаны
+    if last_error == "429":
+        return (
+            "⏳ ИИ сейчас перегружен — слишком много запросов.\n\n"
+            "Подождите 30 секунд и попробуйте снова."
+        )
+    elif last_error == "timeout":
+        return (
+            "⏱ ИИ не успел ответить.\n\n"
+            "Попробуйте ещё раз — обычно со второй попытки работает."
+        )
+    else:
+        return f"❌ Не удалось получить ответ от ИИ. Попробуйте позже."
 
 
 def _months_from_birthdate(birthdate_str: str) -> int:
@@ -161,18 +197,12 @@ async def got_document_for_analysis(update: Update, context: ContextTypes.DEFAUL
         parts = []
 
         if msg.photo:
-            # Берём фото наибольшего размера
             photo = msg.photo[-1]
             file = await context.bot.get_file(photo.file_id)
             file_bytes = await file.download_as_bytearray()
             b64 = base64.standard_b64encode(bytes(file_bytes)).decode()
-            parts.append({
-                "inline_data": {
-                    "mime_type": "image/jpeg",
-                    "data": b64
-                }
-            })
-            parts.append({"text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."})
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+            parts.append({"text": "Объясни что написано в этом медицинском документе простым языком."})
 
         elif msg.document:
             doc = msg.document
@@ -182,25 +212,15 @@ async def got_document_for_analysis(update: Update, context: ContextTypes.DEFAUL
                 file = await context.bot.get_file(doc.file_id)
                 file_bytes = await file.download_as_bytearray()
                 b64 = base64.standard_b64encode(bytes(file_bytes)).decode()
-                parts.append({
-                    "inline_data": {
-                        "mime_type": "application/pdf",
-                        "data": b64
-                    }
-                })
-                parts.append({"text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."})
+                parts.append({"inline_data": {"mime_type": "application/pdf", "data": b64}})
+                parts.append({"text": "Объясни что написано в этом медицинском документе простым языком."})
 
             elif mime.startswith("image/"):
                 file = await context.bot.get_file(doc.file_id)
                 file_bytes = await file.download_as_bytearray()
                 b64 = base64.standard_b64encode(bytes(file_bytes)).decode()
-                parts.append({
-                    "inline_data": {
-                        "mime_type": mime,
-                        "data": b64
-                    }
-                })
-                parts.append({"text": "Пожалуйста, объясни что написано в этом медицинском документе простым языком."})
+                parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+                parts.append({"text": "Объясни что написано в этом медицинском документе простым языком."})
 
             else:
                 await thinking_msg.edit_text(
@@ -208,9 +228,7 @@ async def got_document_for_analysis(update: Update, context: ContextTypes.DEFAUL
                 )
                 return AI_WAIT_DOC
         else:
-            await thinking_msg.edit_text(
-                "⚠️ Пришли фото или PDF-файл с медицинским документом."
-            )
+            await thinking_msg.edit_text("⚠️ Пришли фото или PDF-файл с медицинским документом.")
             return AI_WAIT_DOC
 
         answer = await _ask_gemini(parts=parts, system=system_prompt, max_tokens=2000)
@@ -231,7 +249,7 @@ async def got_document_for_analysis(update: Update, context: ContextTypes.DEFAUL
         )
 
     except Exception as e:
-        await thinking_msg.edit_text(f"❌ Не удалось обработать файл: {e}")
+        await thinking_msg.edit_text("❌ Не удалось обработать файл. Попробуйте ещё раз.")
 
     return ConversationHandler.END
 
@@ -261,7 +279,6 @@ async def show_ai_advice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emoji = "👧" if ch["gender"] == "girl" else "👦"
     gender_word = "девочка" if ch["gender"] == "girl" else "мальчик"
 
-    # Дополнительный контекст из базы
     allergies = db.get_allergies(child_id)
     allergy_names = [a["name"] for a in allergies] if allergies else []
     allergy_context = f"Известные аллергии: {', '.join(allergy_names)}." if allergy_names else ""
@@ -270,13 +287,13 @@ async def show_ai_advice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     growth_context = ""
     if growth:
         last = growth[0]
-        parts = []
+        parts_list = []
         if last["height_cm"]:
-            parts.append(f"рост {last['height_cm']} см")
+            parts_list.append(f"рост {last['height_cm']} см")
         if last["weight_kg"]:
-            parts.append(f"вес {last['weight_kg']} кг")
-        if parts:
-            growth_context = f"Последние замеры: {', '.join(parts)}."
+            parts_list.append(f"вес {last['weight_kg']} кг")
+        if parts_list:
+            growth_context = f"Последние замеры: {', '.join(parts_list)}."
 
     system_prompt = (
         "Ты заботливый и опытный помощник для мам, как подруга-педиатр. "
