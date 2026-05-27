@@ -177,8 +177,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Запускаем онбординг для новых пользователей
         await start_onboarding(update, context)
     else:
+        # Ищем ближайшую прививку среди всех детей
+        from datetime import date as _date
+        children = db.get_children(user.id)
+        hint = ""
+        earliest_days = None
+        earliest_text = ""
+        today = _date.today()
+        for ch in children:
+            vaccines = db.get_vaccinations(ch["id"], user.id)
+            for v in vaccines:
+                if v["done_date"] or not v["scheduled_date"]:
+                    continue
+                try:
+                    sched = datetime.strptime(v["scheduled_date"], "%d.%m.%Y").date()
+                except Exception:
+                    continue
+                days_left = (sched - today).days
+                if days_left >= 0 and (earliest_days is None or days_left < earliest_days):
+                    earliest_days = days_left
+                    if days_left == 0:
+                        label = "сегодня"
+                    elif days_left == 1:
+                        label = "завтра"
+                    else:
+                        label = f"через {days_left} дн."
+                    earliest_text = f"\n\n💉 Ближайшая прививка — *{v['vaccine_name']}* ({ch['name']}) {label}"
+        hint = earliest_text
+
         welcome = (
-            f"С возвращением, {name}! 🌸\n\n"
+            f"С возвращением, {name}! 🌸"
+            f"{hint}\n\n"
             f"Выберите раздел в меню ниже 👇"
         )
         await update.message.reply_text(
@@ -241,12 +270,12 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_ai_menu(update, context)
     elif text == BTN_PAGE2:
         await update.message.reply_text(
-            "📋 Дополнительные функции:",
+            "👇",
             reply_markup=main_reply_keyboard(2)
         )
     elif text == BTN_PAGE1:
         await update.message.reply_text(
-            "🏠 Главное меню:",
+            "👇",
             reply_markup=main_reply_keyboard(1)
         )
 
