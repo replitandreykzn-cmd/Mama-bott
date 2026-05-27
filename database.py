@@ -793,3 +793,33 @@ def get_checkups_done(child_id):
     rows = _fetchall(c)
     conn.close()
     return set(r["checkup_months"] for r in rows)
+# ── Дополнительные функции для интеграции с PDF-экспортом ──────────────────────
+
+def get_medical_info(child_id):
+    """Возвращает общую мед. информацию (группа крови, резус, полис)"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM medical_info WHERE child_id=?"), (child_id,))
+    row = _fetchone(c)
+    conn.close()
+    return row if row else {}
+
+
+def get_allergies(child_id):
+    """Возвращает список аллергий ребёнка"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM allergies WHERE child_id=?"), (child_id,))
+    rows = _fetchall(c)
+    conn.close()
+    return rows if rows else []
+
+
+def get_contraindications(child_id):
+    """Возвращает список противопоказаний ребёнка"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM contraindications WHERE child_id=?"), (child_id,))
+    rows = _fetchall(c)
+    conn.close()
+    return rows if rows else []
