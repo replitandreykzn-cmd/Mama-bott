@@ -79,6 +79,11 @@ from handlers.referral import show_referral_menu, handle_referral_start
 from handlers.onboarding import (
     start_onboarding, onboarding_step_cb, finish_onboarding_cb,
 )
+from handlers.pregnancy import (
+    show_pregnancy_menu, start_set_pdr_cb, got_pdr_date,
+    show_hospital_bag_cb, pregnancy_born_cb, cancel_preg,
+    PREG_DATE,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -90,18 +95,21 @@ TRIAL_DAYS = 14
 TZ = ZoneInfo(os.environ.get("BOT_TIMEZONE", "Europe/Moscow"))
 
 # ── Кнопки нижней клавиатуры ─────────────────────────────────────────────────
-BTN_CHILD        = "👶 Мой ребёнок"
+BTN_CHILD        = "👶 Ребёнок"
 BTN_GROWTH       = "📏 Рост и вес"
 BTN_VACCINES     = "💉 Прививки"
 BTN_REMINDERS    = "🔔 Напоминания"
 BTN_MEDICATIONS  = "💊 Лекарства"
 BTN_ILLNESS      = "🤒 Болезни"
 BTN_SUBSCRIPTION = "⭐ Подписка"
-BTN_PDF          = "📄 PDF для врача"
+BTN_PDF          = "📄 PDF"
 BTN_CHECKUPS     = "🏥 Осмотры"
 BTN_EXCEL        = "📊 Excel"
-BTN_MEDICAL      = "🏥 Медкарта"
+BTN_MEDICAL      = "🩺 Медкарта"
 BTN_CHAT         = "💬 Чат мам"
+BTN_PREGNANCY    = "🤰 Беременность"
+BTN_PAGE2        = "➡️ Ещё"
+BTN_PAGE1        = "⬅️ Назад"
 
 CHAT_URL = os.environ.get("CHAT_URL", "")
 
@@ -109,22 +117,29 @@ MENU_BUTTONS = [
     BTN_CHILD, BTN_GROWTH, BTN_VACCINES, BTN_REMINDERS,
     BTN_MEDICATIONS, BTN_ILLNESS, BTN_SUBSCRIPTION, BTN_PDF,
     BTN_CHECKUPS, BTN_EXCEL, BTN_MEDICAL, BTN_CHAT,
+    BTN_PREGNANCY, BTN_PAGE2, BTN_PAGE1,
+]
+
+# Страница 1 — основные функции
+PAGE1_KEYBOARD = [
+    [BTN_CHILD,       BTN_GROWTH],
+    [BTN_VACCINES,    BTN_CHECKUPS],
+    [BTN_MEDICATIONS, BTN_ILLNESS],
+    [BTN_REMINDERS,   BTN_PAGE2],
+]
+
+# Страница 2 — дополнительные
+PAGE2_KEYBOARD = [
+    [BTN_MEDICAL,     BTN_PDF],
+    [BTN_EXCEL,       BTN_SUBSCRIPTION],
+    [BTN_PREGNANCY,   BTN_CHAT],
+    [BTN_PAGE1,       BTN_PAGE1],
 ]
 
 
-def main_reply_keyboard():
-    return ReplyKeyboardMarkup(
-        [
-            [BTN_CHILD,        BTN_GROWTH],
-            [BTN_VACCINES,     BTN_REMINDERS],
-            [BTN_MEDICATIONS,  BTN_ILLNESS],
-            [BTN_CHECKUPS,     BTN_MEDICAL],
-            [BTN_PDF,          BTN_EXCEL],
-            [BTN_SUBSCRIPTION, BTN_CHAT],
-        ],
-        resize_keyboard=True,
-        is_persistent=True,
-    )
+def main_reply_keyboard(page=1):
+    kb = PAGE1_KEYBOARD if page == 1 else PAGE2_KEYBOARD
+    return ReplyKeyboardMarkup(kb, resize_keyboard=True, is_persistent=True)
 
 
 # ── Старт ────────────────────────────────────────────────────────────────────
@@ -151,7 +166,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(
             welcome, parse_mode="Markdown",
-            reply_markup=main_reply_keyboard()
+            reply_markup=main_reply_keyboard(1)
         )
         # Запускаем онбординг для новых пользователей
         await start_onboarding(update, context)
@@ -162,7 +177,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(
             welcome, parse_mode="Markdown",
-            reply_markup=main_reply_keyboard()
+            reply_markup=main_reply_keyboard(1)
         )
 
 
@@ -193,8 +208,9 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == BTN_MEDICAL:
         await show_medical_info_menu(update, context)
     elif text == BTN_CHAT:
-        if CHAT_URL:
-            keyboard = [[InlineKeyboardButton("💬 Открыть чат мам", url=CHAT_URL)]]
+        chat_url = os.environ.get("CHAT_URL", "")
+        if chat_url:
+            keyboard = [[InlineKeyboardButton("💬 Открыть чат мам", url=chat_url)]]
             await update.message.reply_text(
                 "💬 *Чат мам МамаБота*\n\nОбщайтесь, задавайте вопросы, делитесь опытом!",
                 parse_mode="Markdown",
@@ -202,6 +218,18 @@ async def route_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await update.message.reply_text("Чат скоро будет добавлен!")
+    elif text == BTN_PREGNANCY:
+        await show_pregnancy_menu(update, context)
+    elif text == BTN_PAGE2:
+        await update.message.reply_text(
+            "📋 Дополнительные функции:",
+            reply_markup=main_reply_keyboard(2)
+        )
+    elif text == BTN_PAGE1:
+        await update.message.reply_text(
+            "🏠 Главное меню:",
+            reply_markup=main_reply_keyboard(1)
+        )
 
 
 async def route_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -320,11 +348,14 @@ async def send_weekly_vaccine_reminders(app: Application):
         if messages:
             text = "💉 *Напоминание о прививках*\n\n" + "\n\n".join(messages)
             family_ids = db.get_family_user_ids(user_id)
-            for uid in family_ids:
+            for i_uid, uid in enumerate(family_ids):
                 try:
                     await app.bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
                 except Exception as e:
                     logger.error(f"Weekly vaccine reminder failed for {uid}: {e}")
+                if (i_uid + 1) % 25 == 0:
+                    import asyncio
+                    await asyncio.sleep(1)
 
 
 # ── Точка входа ──────────────────────────────────────────────────────────────
@@ -414,6 +445,15 @@ def main():
         allow_reentry=True,
     )
 
+    pregnancy_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_set_pdr_cb, pattern="^preg_set_pdr$")],
+        states={
+            PREG_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~kb_filter, got_pdr_date)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_preg), MessageHandler(kb_filter, route_keyboard)],
+        allow_reentry=True,
+    )
+
     policy_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(set_policy_cb, pattern="^mi_policy:")],
         states={
@@ -461,6 +501,7 @@ def main():
     app.add_handler(add_med_conv)
     app.add_handler(add_illness_conv)
     app.add_handler(add_illness_entry_conv)
+    app.add_handler(pregnancy_conv)
     app.add_handler(policy_conv)
     app.add_handler(allergy_conv)
     app.add_handler(contra_conv)
@@ -535,6 +576,11 @@ def main():
 
     # ── Реферальная система ───────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(show_referral_menu, pattern="^referral$"))
+
+    # ── Беременность ──────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(show_pregnancy_menu,   pattern="^pregnancy$"))
+    app.add_handler(CallbackQueryHandler(show_hospital_bag_cb,  pattern="^preg_bag$"))
+    app.add_handler(CallbackQueryHandler(pregnancy_born_cb,     pattern="^preg_born$"))
 
     # ── Болезни ───────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(show_illness_child_cb, pattern="^ill_child:"))
