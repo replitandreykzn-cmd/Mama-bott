@@ -1,6 +1,7 @@
 import os
 import psycopg2
 import psycopg2.extras
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -28,7 +29,7 @@ def _is_pg():
 def _q(sql):
     """Конвертирует ? в %s для PostgreSQL."""
     if _is_pg():
-        return sql.replace(\"?\", \"%s\")
+        return sql.replace("?", "%s")
     return sql
 
 
@@ -46,7 +47,7 @@ def _fetchall(cursor):
     rows = cursor.fetchall()
     if _is_pg():
         cols = [desc[0] for desc in cursor.description]
-        return [dict(zip(cols, row)) for row in rows]\
+        return [dict(zip(cols, row)) for row in rows]
     return rows
 
 
@@ -55,191 +56,289 @@ def init_db():
     c = conn.cursor()
     pg = _is_pg()
 
-    auto_inc = "SERIAL PRIMARY KEY" if pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    text_type = "TEXT"
+    auto = "SERIAL PRIMARY KEY" if pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    text_default = "TIMESTAMP DEFAULT NOW()" if pg else "TEXT DEFAULT CURRENT_TIMESTAMP"
+    int_type = "INTEGER" if not pg else "INTEGER"
 
-    # Таблица пользователей
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
-            username {text_type},
-            first_name {text_type},
-            created_at {text_type},
-            premium_until {text_type}
+            username TEXT,
+            first_name TEXT,
+            is_premium INTEGER DEFAULT 0,
+            premium_until TEXT,
+            trial_used INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица детей
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS family_members (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            owner_user_id BIGINT NOT NULL,
+            member_user_id BIGINT NOT NULL,
+            added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(owner_user_id, member_user_id)
+        )
+    """)
+
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS children (
-            id {auto_inc},
-            user_id BIGINT,
-            name {text_type},
-            birthdate {text_type},
-            gender {text_type}
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            user_id BIGINT NOT NULL,
+            name TEXT NOT NULL,
+            birthdate TEXT NOT NULL,
+            gender TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица роста и веса
     c.execute(f"""
-        CREATE TABLE IF NOT EXISTS growth (
-            id {auto_inc},
-            child_id INTEGER,
-            user_id BIGINT,
-            rec_date {text_type},
-            height REAL,
-            weight REAL
+        CREATE TABLE IF NOT EXISTS growth_records (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            user_id BIGINT NOT NULL,
+            date TEXT NOT NULL,
+            height_cm REAL,
+            weight_kg REAL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица вакцинации
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS vaccinations (
-            id {auto_inc},
-            child_id INTEGER,
-            vaccine_name {text_type},
-            scheduled_date {text_type},
-            done_date {text_type}
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            user_id BIGINT NOT NULL,
+            vaccine_name TEXT NOT NULL,
+            scheduled_date TEXT,
+            done_date TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица напоминаний
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS reminders (
-            id {auto_inc},
-            user_id BIGINT,
-            title {text_type},
-            remind_at {text_type},
-            is_active INTEGER DEFAULT 1
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            user_id BIGINT NOT NULL,
+            child_id INTEGER,
+            title TEXT NOT NULL,
+            remind_at TEXT NOT NULL,
+            repeat_type TEXT DEFAULT 'none',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица лекарств
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS photo_diary (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            user_id BIGINT NOT NULL,
+            child_id INTEGER NOT NULL,
+            file_id TEXT NOT NULL,
+            caption TEXT,
+            photo_date TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS medications (
-            id {auto_inc},
-            child_id INTEGER,
-            user_id BIGINT,
-            name {text_type},
-            dose {text_type},
-            interval_hours INTEGER,
-            end_date {text_type},
-            next_remind {text_type},
-            is_active INTEGER DEFAULT 1
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            user_id BIGINT NOT NULL,
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            dose TEXT,
+            interval_hours REAL NOT NULL,
+            next_reminder_at TEXT NOT NULL,
+            end_date TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица болезней
     c.execute(f"""
-        CREATE TABLE IF NOT EXISTS illnesses (
-            id {auto_inc},
-            child_id INTEGER,
-            illness_name {text_type},
-            start_date {text_type},
-            end_date {text_type},
-            temperature {text_type},
-            symptoms {text_type},
-            medications {text_type},
-            notes {text_type},
-            is_active INTEGER DEFAULT 1
+        CREATE TABLE IF NOT EXISTS illness_log (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            user_id BIGINT NOT NULL,
+            child_id INTEGER NOT NULL,
+            illness_name TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица медкарты
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS illness_entries (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            illness_id INTEGER NOT NULL,
+            entry_date TEXT NOT NULL,
+            temperature REAL,
+            symptoms TEXT,
+            medications_given TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS medical_info (
-            child_id INTEGER PRIMARY KEY,
-            blood_group {text_type},
-            blood_rh {text_type},
-            policy_number {text_type},
-            policy_company {text_type},
-            snils {text_type}
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL UNIQUE,
+            blood_group TEXT,
+            blood_rh TEXT,
+            policy_number TEXT,
+            policy_company TEXT,
+            snils TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица аллергий
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS allergies (
-            id {auto_inc},
-            child_id INTEGER,
-            name {text_type},
-            reaction {text_type},
-            severity {text_type}
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            reaction TEXT,
+            severity TEXT DEFAULT 'mild',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица противопоказаний
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS contraindications (
-            id {auto_inc},
-            child_id INTEGER,
-            name {text_type}
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица рефералов
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS checkups_done (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            checkup_months INTEGER NOT NULL,
+            done_date TEXT NOT NULL,
+            UNIQUE(child_id, checkup_months)
+        )
+    """)
+
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS referrals (
-            id {auto_inc},
-            referrer_user_id BIGINT,
-            referred_user_id BIGINT UNIQUE,
-            bonus_given INTEGER DEFAULT 0
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            referrer_user_id BIGINT NOT NULL,
+            referred_user_id BIGINT NOT NULL UNIQUE,
+            bonus_given INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Таблица семейного доступа
+    if not pg:
+        for migration in [
+            "ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN referred_by BIGINT",
+        ]:
+            try:
+                c.execute(migration)
+            except Exception:
+                pass
+
+
     c.execute(f"""
-        CREATE TABLE IF NOT EXISTS family_access (
-            id {auto_inc},
-            owner_user_id BIGINT,
-            member_user_id BIGINT,
-            PRIMARY KEY (owner_user_id, member_user_id)
+        CREATE TABLE IF NOT EXISTS medical_info (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL UNIQUE,
+            blood_group TEXT,
+            blood_rh TEXT,
+            policy_number TEXT,
+            policy_company TEXT,
+            snils TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Пройденные осмотры
-    if pg:
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS checkups_done (
-                child_id INTEGER,
-                checkup_months INTEGER,
-                done_date TEXT,
-                PRIMARY KEY (child_id, checkup_months)
-            )
-        """)
-    else:
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS checkups_done (
-                child_id INTEGER,
-                checkup_months INTEGER,
-                done_date TEXT,
-                PRIMARY KEY (child_id, checkup_months)
-            )
-        """)
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS allergies (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            reaction TEXT,
+            severity TEXT DEFAULT 'mild',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS contraindications (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS checkups_done (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            child_id INTEGER NOT NULL,
+            checkup_months INTEGER NOT NULL,
+            done_date TEXT NOT NULL,
+            UNIQUE(child_id, checkup_months)
+        )
+    """)
+
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS referrals (
+            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+            referrer_user_id BIGINT NOT NULL,
+            referred_user_id BIGINT NOT NULL UNIQUE,
+            bonus_given INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    if not pg:
+        for migration in [
+            "ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN referred_by BIGINT",
+        ]:
+            try:
+                c.execute(migration)
+            except Exception:
+                pass
 
     conn.commit()
     conn.close()
 
 
-# ── Функции пользователей ───────────────────────────────────────────────────
-
-def add_user(user_id, username, first_name):
+def upsert_user(user_id, username, first_name):
     conn = get_conn()
     c = conn.cursor()
-    now = datetime.now(_TZ).isoformat()
+    c.execute(_q("SELECT user_id FROM users WHERE user_id=?"), (user_id,))
+    existing = _fetchone(c)
+    is_new = existing is None
     if _is_pg():
-        c.execute(
-            "INSERT INTO users (user_id, username, first_name, created_at) "
-            "VALUES (%s,%s,%s,%s) ON CONFLICT (user_id) DO NOTHING",
-            (user_id, username, first_name, now)
-        )
+        c.execute("""
+            INSERT INTO users (user_id, username, first_name)
+            VALUES (%s, %s, %s)
+            ON CONFLICT(user_id) DO UPDATE SET username=EXCLUDED.username, first_name=EXCLUDED.first_name
+        """, (user_id, username, first_name))
     else:
-        c.execute(
-            "INSERT OR IGNORE INTO users (user_id, username, first_name, created_at) VALUES (?,?,?,?)",
-            (user_id, username, first_name, now)
-        )
+        c.execute("""
+            INSERT INTO users (user_id, username, first_name)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name
+        """, (user_id, username, first_name))
     conn.commit()
     conn.close()
+    return is_new
 
 
 def get_user(user_id):
@@ -251,128 +350,228 @@ def get_user(user_id):
     return row
 
 
-def is_premium(user_id):
+def activate_trial(user_id):
+    user = get_user(user_id)
+    if user and user["trial_used"]:
+        return None
+    until = (datetime.now() + timedelta(days=14)).isoformat()
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("SELECT premium_until FROM users WHERE user_id=?"), (user_id,))
-    row = _fetchone(c)
+    c.execute(_q("UPDATE users SET is_premium=1, premium_until=?, trial_used=1 WHERE user_id=?"), (until, user_id))
+    conn.commit()
     conn.close()
-    if not row or not row["premium_until"]:
-        return False
-    try:
-        until = datetime.fromisoformat(row["premium_until"])
-        return until > datetime.now()
-    except Exception:
-        return False
+    return until
 
 
-def set_premium(user_id, until_iso):
+def set_premium(user_id, until_date: str):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("UPDATE users SET premium_until=? WHERE user_id=?"), (until_iso, user_id))
+    c.execute(_q("UPDATE users SET is_premium=1, premium_until=? WHERE user_id=?"), (until_date, user_id))
     conn.commit()
     conn.close()
 
 
-def get_premium_users():
+def is_premium(user_id):
+    if _check_premium_direct(user_id):
+        return True
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT user_id, premium_until FROM users WHERE premium_until IS NOT NULL")
+    c.execute(_q("SELECT owner_user_id FROM family_members WHERE member_user_id=?"), (user_id,))
+    owners = _fetchall(c)
+    conn.close()
+    for row in owners:
+        if _check_premium_direct(row["owner_user_id"]):
+            return True
+    return False
+
+
+def _check_premium_direct(user_id):
+    user = get_user(user_id)
+    if not user or not user["is_premium"]:
+        return False
+    if user["premium_until"]:
+        until = datetime.fromisoformat(user["premium_until"])
+        if until < datetime.now():
+            conn = get_conn()
+            c = conn.cursor()
+            c.execute(_q("UPDATE users SET is_premium=0 WHERE user_id=?"), (user_id,))
+            conn.commit()
+            conn.close()
+            return False
+    return True
+
+
+def revoke_premium(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("UPDATE users SET is_premium=0, premium_until=NULL WHERE user_id=?"), (user_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── Семейный доступ ──────────────────────────────────────────────────────────
+
+def add_family_member(owner_user_id, member_user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute(_q("INSERT INTO family_members (owner_user_id, member_user_id) VALUES (?,?)"),
+                  (owner_user_id, member_user_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        conn.close()
+        return False
+
+
+def remove_family_member(owner_user_id, member_user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("DELETE FROM family_members WHERE owner_user_id=? AND member_user_id=?"),
+              (owner_user_id, member_user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_family_members(owner_user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("""SELECT fm.member_user_id, u.username, u.first_name
+               FROM family_members fm
+               LEFT JOIN users u ON u.user_id = fm.member_user_id
+               WHERE fm.owner_user_id=?"""), (owner_user_id,))
     rows = _fetchall(c)
     conn.close()
     return rows
 
 
-# ── Функции детей ───────────────────────────────────────────────────────────
-
-def add_child(user_id, name, birthdate, gender):
+def get_family_owner(member_user_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        _q("INSERT INTO children (user_id, name, birthdate, gender) VALUES (?,?,?,?)"),
-        (user_id, name, birthdate, gender)
-    )
-    conn.commit()
+    c.execute(_q("SELECT owner_user_id FROM family_members WHERE member_user_id=?"), (member_user_id,))
+    row = _fetchone(c)
     conn.close()
+    return row["owner_user_id"] if row else None
+
+
+# ── Дети ─────────────────────────────────────────────────────────────────────
+
+
+def get_family_user_ids(user_id):
+    """Возвращает всех кому нужно слать уведомления:
+    если user_id — владелец, возвращает его + всех членов семьи.
+    Если user_id — член семьи, возвращает владельца + всех членов."""
+    conn = get_conn()
+    c = conn.cursor()
+
+    # Проверяем — может user_id сам является членом чьей-то семьи
+    c.execute(_q("SELECT owner_user_id FROM family_members WHERE member_user_id=?"), (user_id,))
+    owner_row = _fetchone(c)
+
+    if owner_row:
+        owner_id = owner_row["owner_user_id"]
+    else:
+        owner_id = user_id
+
+    # Берём всех членов семьи владельца
+    c.execute(_q("SELECT member_user_id FROM family_members WHERE owner_user_id=?"), (owner_id,))
+    members = _fetchall(c)
+    conn.close()
+
+    ids = set([owner_id])
+    for m in members:
+        ids.add(m["member_user_id"])
+    return list(ids)
 
 
 def get_children(user_id):
+    owner = get_family_owner(user_id)
+    target = owner if owner else user_id
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("SELECT * FROM children WHERE user_id=? ORDER BY id"), (user_id,))
+    c.execute(_q("SELECT * FROM children WHERE user_id=? ORDER BY birthdate"), (target,))
     rows = _fetchall(c)
     conn.close()
     return rows
 
 
 def get_child(child_id, user_id):
+    owner = get_family_owner(user_id)
+    allowed_ids = [user_id] + ([owner] if owner else [])
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("SELECT * FROM children WHERE id=? AND user_id=?"), (child_id, user_id))
+    placeholders = ",".join(["%s" if _is_pg() else "?"] * len(allowed_ids))
+    c.execute(f"SELECT * FROM children WHERE id={'%s' if _is_pg() else '?'} AND user_id IN ({placeholders})",
+              [child_id] + allowed_ids)
     row = _fetchone(c)
     conn.close()
     return row
 
 
+def add_child(user_id, name, birthdate, gender):
+    owner = get_family_owner(user_id)
+    target = owner if owner else user_id
+    conn = get_conn()
+    c = conn.cursor()
+    if _is_pg():
+        c.execute("INSERT INTO children (user_id, name, birthdate, gender) VALUES (%s,%s,%s,%s) RETURNING id",
+                  (target, name, birthdate, gender))
+        child_id = c.fetchone()[0]
+    else:
+        c.execute("INSERT INTO children (user_id, name, birthdate, gender) VALUES (?,?,?,?)",
+                  (target, name, birthdate, gender))
+        child_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return child_id
+
+
 def delete_child(child_id, user_id):
+    owner = get_family_owner(user_id)
+    allowed_ids = [user_id] + ([owner] if owner else [])
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("DELETE FROM children WHERE id=? AND user_id=?"), (child_id, user_id))
-    c.execute(_q("DELETE FROM growth WHERE child_id=?"), (child_id,))
+    ph = "%s" if _is_pg() else "?"
+    c.execute(_q("DELETE FROM growth_records WHERE child_id=?"), (child_id,))
     c.execute(_q("DELETE FROM vaccinations WHERE child_id=?"), (child_id,))
-    c.execute(_q("DELETE FROM checkups_done WHERE child_id=?"), (child_id,))
-    c.execute(_q("DELETE FROM medical_info WHERE child_id=?"), (child_id,))
-    c.execute(_q("DELETE FROM allergies WHERE child_id=?"), (child_id,))
-    c.execute(_q("DELETE FROM contraindications WHERE child_id=?"), (child_id,))
+    c.execute(_q("DELETE FROM photo_diary WHERE child_id=?"), (child_id,))
+    c.execute(_q("DELETE FROM medications WHERE child_id=?"), (child_id,))
+    c.execute(_q("DELETE FROM illness_entries WHERE illness_id IN (SELECT id FROM illness_log WHERE child_id=?)"), (child_id,))
+    c.execute(_q("DELETE FROM illness_log WHERE child_id=?"), (child_id,))
+    placeholders = ",".join([ph] * len(allowed_ids))
+    c.execute(f"DELETE FROM children WHERE id={ph} AND user_id IN ({placeholders})", [child_id] + allowed_ids)
     conn.commit()
     conn.close()
 
 
-def get_all_children_raw():
-    """Возвращает список всех детей из базы данных для фоновой рассылки."""
+# ── Рост и вес ───────────────────────────────────────────────────────────────
+
+def add_growth_record(user_id, child_id, date, height, weight):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT id, user_id, name, birthdate, gender FROM children")
+    c.execute(_q("INSERT INTO growth_records (child_id, user_id, date, height_cm, weight_kg) VALUES (?,?,?,?,?)"),
+              (child_id, user_id, date, height, weight))
+    conn.commit()
+    conn.close()
+
+
+def get_growth_records(child_id, user_id, limit=100):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM growth_records WHERE child_id=? ORDER BY date DESC LIMIT ?"), (child_id, limit))
     rows = _fetchall(c)
     conn.close()
     return rows
 
 
-# ── Рост и вес ──────────────────────────────────────────────────────────────
+# ── Прививки ─────────────────────────────────────────────────────────────────
 
-def add_growth_record(user_id, child_id, rec_date, height, weight):
+def add_vaccination(user_id, child_id, vaccine_name, scheduled_date=None, done_date=None, notes=None):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        _q("INSERT INTO growth (user_id, child_id, rec_date, height, weight) VALUES (?,?,?,?,?)"),
-        (user_id, child_id, rec_date, height, weight)
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_growth_records(child_id, user_id, limit=10):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        _q("SELECT * FROM growth WHERE child_id=? AND user_id=? ORDER BY id DESC LIMIT ?"),
-        (child_id, user_id, limit)
-    )
-    rows = _fetchall(c)
-    conn.close()
-    return rows
-
-
-# ── Вакцинация ──────────────────────────────────────────────────────────────
-
-def add_vaccination_schedule(child_id, schedule_list):
-    conn = get_conn()
-    c = conn.cursor()
-    for name, s_date in schedule_list:
-        c.execute(
-            _q("INSERT INTO vaccinations (child_id, vaccine_name, scheduled_date) VALUES (?,?,?)"),
-            (child_id, name, s_date)
-        )
+    c.execute(_q("INSERT INTO vaccinations (child_id, user_id, vaccine_name, scheduled_date, done_date, notes) VALUES (?,?,?,?,?,?)"),
+              (child_id, user_id, vaccine_name, scheduled_date, done_date, notes))
     conn.commit()
     conn.close()
 
@@ -380,10 +579,7 @@ def add_vaccination_schedule(child_id, schedule_list):
 def get_vaccinations(child_id, user_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        _q("SELECT v.* FROM vaccinations v JOIN children ch ON v.child_id=ch.id WHERE v.child_id=? AND ch.user_id=? ORDER BY v.id"),
-        (child_id, user_id)
-    )
+    c.execute(_q("SELECT * FROM vaccinations WHERE child_id=? ORDER BY scheduled_date"), (child_id,))
     rows = _fetchall(c)
     conn.close()
     return rows
@@ -392,47 +588,18 @@ def get_vaccinations(child_id, user_id):
 def mark_vaccination_done(vac_id, user_id, done_date):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        _q("UPDATE vaccinations SET done_date=? WHERE id=? AND child_id IN (SELECT id FROM children WHERE user_id=?)"),
-        (done_date, vac_id, user_id)
-    )
+    c.execute(_q("UPDATE vaccinations SET done_date=? WHERE id=?"), (done_date, vac_id))
     conn.commit()
     conn.close()
 
 
-def get_weekly_pending_vaccines():
+# ── Напоминания ──────────────────────────────────────────────────────────────
+
+def add_reminder(user_id, child_id, title, remind_at, repeat_type="none"):
     conn = get_conn()
     c = conn.cursor()
-    today = datetime.now(_TZ).date()
-    next_week = today + timedelta(days=7)
-    
-    sql = "SELECT v.id, v.vaccine_name, v.scheduled_date, ch.name as child_name, ch.user_id, ch.gender FROM vaccinations v JOIN children ch ON v.child_id=ch.id WHERE v.done_date IS NULL"
-    c.execute(sql)
-    rows = _fetchall(c)
-    conn.close()
-
-    urgent = []
-    for r in rows:
-        if not r["scheduled_date"]:
-            continue
-        try:
-            d = datetime.strptime(r["scheduled_date"], "%d.%m.%Y").date()
-            if today <= d <= next_week:
-                urgent.append(r)
-        except Exception:
-            pass
-    return urgent
-
-
-# ── Напоминания ─────────────────────────────────────────────────────────────
-
-def add_reminder(user_id, title, remind_at_iso):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        _q("INSERT INTO reminders (user_id, title, remind_at) VALUES (?,?,?)"),
-        (user_id, title, remind_at_iso)
-    )
+    c.execute(_q("INSERT INTO reminders (user_id, child_id, title, remind_at, repeat_type) VALUES (?,?,?,?,?)"),
+              (user_id, child_id, title, remind_at, repeat_type))
     conn.commit()
     conn.close()
 
@@ -443,25 +610,24 @@ def get_reminders(user_id, active_only=True):
     if active_only:
         c.execute(_q("SELECT * FROM reminders WHERE user_id=? AND is_active=1 ORDER BY remind_at"), (user_id,))
     else:
-        c.execute(_q("SELECT * FROM reminders WHERE user_id=? ORDER BY remind_at DESC"), (user_id,))
+        c.execute(_q("SELECT * FROM reminders WHERE user_id=? ORDER BY remind_at"), (user_id,))
     rows = _fetchall(c)
     conn.close()
     return rows
 
 
-def delete_reminder(reminder_id, user_id):
+def get_due_reminders(now_str: str = None):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("DELETE FROM reminders WHERE id=? AND user_id=?"), (reminder_id, user_id))
-    conn.commit()
-    conn.close()
-
-
-def get_due_reminders():
-    conn = get_conn()
-    c = conn.cursor()
-    now_iso = datetime.now(_TZ).isoformat()
-    c.execute(_q("SELECT * FROM reminders WHERE is_active=1 AND remind_at<=?"), (now_iso,))
+    if now_str is None:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # remind_at может быть в формате ISO (2026-05-26T13:30:00) или (2026-05-26 13:30)
+    # Нормализуем: заменяем T на пробел и берём первые 16 символов для сравнения
+    c.execute(_q("""
+        SELECT * FROM reminders
+        WHERE is_active=1
+        AND REPLACE(SUBSTR(remind_at, 1, 16), 'T', ' ') <= ?
+    """), (now_str,))
     rows = _fetchall(c)
     conn.close()
     return rows
@@ -475,29 +641,92 @@ def deactivate_reminder(reminder_id):
     conn.close()
 
 
-# ── Лекарства ───────────────────────────────────────────────────────────────
-
-def add_medication(child_id, user_id, name, dose, interval_hours, end_date_str, next_remind_iso):
+def delete_reminder(reminder_id, user_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        _q("INSERT INTO medications (child_id, user_id, name, dose, interval_hours, end_date, next_remind) VALUES (?,?,?,?,?,?,?)"),
-        (child_id, user_id, name, dose, interval_hours, end_date_str, next_remind_iso)
-    )
+    c.execute(_q("DELETE FROM reminders WHERE id=? AND user_id=?"), (reminder_id, user_id))
     conn.commit()
     conn.close()
+
+
+# ── Фотодневник ──────────────────────────────────────────────────────────────
+
+def add_photo(user_id, child_id, file_id, caption, photo_date):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("INSERT INTO photo_diary (user_id, child_id, file_id, caption, photo_date) VALUES (?,?,?,?,?)"),
+              (user_id, child_id, file_id, caption, photo_date))
+    conn.commit()
+    conn.close()
+
+
+def get_photos(child_id, limit=20):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM photo_diary WHERE child_id=? ORDER BY photo_date DESC, created_at DESC LIMIT ?"),
+              (child_id, limit))
+    rows = _fetchall(c)
+    conn.close()
+    return rows
+
+
+def delete_photo(photo_id, user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("DELETE FROM photo_diary WHERE id=? AND user_id=?"), (photo_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+# ── Лекарства ────────────────────────────────────────────────────────────────
+
+def add_medication(user_id, child_id, name, dose, interval_hours, end_date=None):
+    next_at = (datetime.now(_TZ) + timedelta(hours=interval_hours)).isoformat()
+    conn = get_conn()
+    c = conn.cursor()
+    if _is_pg():
+        c.execute("""INSERT INTO medications (user_id, child_id, name, dose, interval_hours, next_reminder_at, end_date)
+                     VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                  (user_id, child_id, name, dose, interval_hours, next_at, end_date))
+        med_id = c.fetchone()[0]
+    else:
+        c.execute("""INSERT INTO medications (user_id, child_id, name, dose, interval_hours, next_reminder_at, end_date)
+                     VALUES (?,?,?,?,?,?,?)""",
+                  (user_id, child_id, name, dose, interval_hours, next_at, end_date))
+        med_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return med_id
 
 
 def get_medications(child_id, active_only=True):
     conn = get_conn()
     c = conn.cursor()
     if active_only:
-        c.execute(_q("SELECT * FROM medications WHERE child_id=? AND is_active=1 ORDER BY id"), (child_id,))
+        c.execute(_q("SELECT * FROM medications WHERE child_id=? AND is_active=1 ORDER BY created_at DESC"), (child_id,))
     else:
-        c.execute(_q("SELECT * FROM medications WHERE child_id=? ORDER BY id DESC"), (child_id,))
+        c.execute(_q("SELECT * FROM medications WHERE child_id=? ORDER BY created_at DESC"), (child_id,))
     rows = _fetchall(c)
     conn.close()
     return rows
+
+
+def get_all_active_medications():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM medications WHERE is_active=1")
+    rows = _fetchall(c)
+    conn.close()
+    return rows
+
+
+def update_medication_next_reminder(med_id, interval_hours):
+    next_at = (datetime.now(_TZ) + timedelta(hours=interval_hours)).isoformat()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("UPDATE medications SET next_reminder_at=? WHERE id=?"), (next_at, med_id))
+    conn.commit()
+    conn.close()
 
 
 def deactivate_medication(med_id, user_id):
@@ -508,76 +737,84 @@ def deactivate_medication(med_id, user_id):
     conn.close()
 
 
-def get_due_medications():
-    conn = get_conn()
-    c = conn.cursor()
-    now_iso = datetime.now(_TZ).isoformat()
-    c.execute(_q("SELECT m.*, ch.name as child_name, ch.gender FROM medications m JOIN children ch ON m.child_id=ch.id WHERE m.is_active=1 AND m.next_remind<=?"), (now_iso,))
-    rows = _fetchall(c)
-    conn.close()
-    return rows
+# ── Журнал болезней ──────────────────────────────────────────────────────────
 
-
-def update_medication_next_remind(med_id, next_iso, is_active=1):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(_q("UPDATE medications SET next_remind=?, is_active=? WHERE id=?"), (next_iso, is_active, med_id))
-    conn.commit()
-    conn.close()
-
-
-# ── Болезни ─────────────────────────────────────────────────────────────────
-
-def add_illness(child_id, name, start_date, temp, symptoms, meds, notes):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        _q("INSERT INTO illnesses (child_id, illness_name, start_date, temperature, symptoms, medications, notes) VALUES (?,?,?,?,?,?,?)"),
-        (child_id, name, start_date, temp, symptoms, meds, notes)
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_illnesses(child_id, active_only=True, limit=10):
-    conn = get_conn()
-    c = conn.cursor()
-    if active_only:
-        c.execute(_q("SELECT * FROM illnesses WHERE child_id=? AND is_active=1 ORDER BY id DESC"), (child_id,))
-    else:
-        c.execute(_q("SELECT * FROM illnesses WHERE child_id=? ORDER BY id DESC LIMIT ?"), (child_id, limit))
-    rows = _fetchall(c)
-    conn.close()
-    return rows
-
-
-def close_illness(illness_id, end_date):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(_q("UPDATE illnesses SET is_active=0, end_date=? WHERE id=?"), (end_date, illness_id))
-    conn.commit()
-    conn.close()
-
-
-# ── Медкарта ─────────────────────────────────────────────────────────────────
-
-def update_medical_base(child_id, blood_group=None, blood_rh=None, policy_number=None, policy_company=None, snils=None):
+def start_illness(user_id, child_id, illness_name, start_date):
     conn = get_conn()
     c = conn.cursor()
     if _is_pg():
-        c.execute("INSERT INTO medical_info (child_id) VALUES (%s) ON CONFLICT (child_id) DO NOTHING", (child_id,))
+        c.execute("INSERT INTO illness_log (user_id, child_id, illness_name, start_date) VALUES (%s,%s,%s,%s) RETURNING id",
+                  (user_id, child_id, illness_name, start_date))
+        ill_id = c.fetchone()[0]
     else:
-        c.execute("INSERT OR IGNORE INTO medical_info (child_id) VALUES (?)", (child_id,))
-    
-    if blood_group: c.execute(_q("UPDATE medical_info SET blood_group=? WHERE child_id=?"), (blood_group, child_id))
-    if blood_rh:    c.execute(_q("UPDATE medical_info SET blood_rh=? WHERE child_id=?"), (blood_rh, child_id))
-    if policy_number:c.execute(_q("UPDATE medical_info SET policy_number=? WHERE child_id=?"), (policy_number, child_id))
-    if policy_company:c.execute(_q("UPDATE medical_info SET policy_company=? WHERE child_id=?"), (policy_company, child_id))
-    if snils:        c.execute(_q("UPDATE medical_info SET snils=? WHERE child_id=?"), (snils, child_id))
-    
+        c.execute("INSERT INTO illness_log (user_id, child_id, illness_name, start_date) VALUES (?,?,?,?)",
+                  (user_id, child_id, illness_name, start_date))
+        ill_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return ill_id
+
+
+def get_illnesses(child_id, active_only=False, limit=10):
+    conn = get_conn()
+    c = conn.cursor()
+    if active_only:
+        c.execute(_q("SELECT * FROM illness_log WHERE child_id=? AND is_active=1 ORDER BY start_date DESC"), (child_id,))
+    else:
+        c.execute(_q("SELECT * FROM illness_log WHERE child_id=? ORDER BY start_date DESC LIMIT ?"), (child_id, limit))
+    rows = _fetchall(c)
+    conn.close()
+    return rows
+
+
+def get_illness(illness_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM illness_log WHERE id=?"), (illness_id,))
+    row = _fetchone(c)
+    conn.close()
+    return row
+
+
+def end_illness(illness_id, end_date):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("UPDATE illness_log SET is_active=0, end_date=? WHERE id=?"), (end_date, illness_id))
     conn.commit()
     conn.close()
 
+
+def add_illness_entry(illness_id, entry_date, temperature, symptoms, medications_given, notes):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("""INSERT INTO illness_entries (illness_id, entry_date, temperature, symptoms, medications_given, notes)
+                    VALUES (?,?,?,?,?,?)"""),
+              (illness_id, entry_date, temperature, symptoms, medications_given, notes))
+    conn.commit()
+    conn.close()
+
+
+def get_illness_entries(illness_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(_q("SELECT * FROM illness_entries WHERE illness_id=? ORDER BY entry_date, created_at"), (illness_id,))
+    rows = _fetchall(c)
+    conn.close()
+    return rows
+
+
+# ── Статистика ───────────────────────────────────────────────────────────────
+
+def get_all_users():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM users ORDER BY created_at DESC")
+    rows = _fetchall(c)
+    conn.close()
+    return rows
+
+
+# ── Медицинская информация ────────────────────────────────────────────────────
 
 def get_medical_info(child_id):
     conn = get_conn()
@@ -588,10 +825,56 @@ def get_medical_info(child_id):
     return row
 
 
-def add_allergy(child_id, name, reaction, severity):
+def set_medical_info(child_id, blood_group=None, blood_rh=None,
+                     policy_number=None, policy_company=None, snils=None):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("INSERT INTO allergies (child_id, name, reaction, severity) VALUES (?,?,?,?)"), (child_id, name, reaction, severity))
+    existing = None
+    c.execute(_q("SELECT id FROM medical_info WHERE child_id=?"), (child_id,))
+    existing = _fetchone(c)
+
+    if existing:
+        fields, vals = [], []
+        if blood_group  is not None: fields.append("blood_group=?");    vals.append(blood_group)
+        if blood_rh     is not None: fields.append("blood_rh=?");       vals.append(blood_rh)
+        if policy_number is not None: fields.append("policy_number=?"); vals.append(policy_number)
+        if policy_company is not None: fields.append("policy_company=?"); vals.append(policy_company)
+        if snils        is not None: fields.append("snils=?");           vals.append(snils)
+        if fields:
+            vals.append(child_id)
+            c.execute(_q(f"UPDATE medical_info SET {', '.join(fields)} WHERE child_id=?"), vals)
+    else:
+        if _is_pg():
+            c.execute(
+                "INSERT INTO medical_info (child_id, blood_group, blood_rh, policy_number, policy_company, snils) "
+                "VALUES (%s,%s,%s,%s,%s,%s)",
+                (child_id, blood_group, blood_rh, policy_number, policy_company, snils)
+            )
+        else:
+            c.execute(
+                "INSERT INTO medical_info (child_id, blood_group, blood_rh, policy_number, policy_company, snils) "
+                "VALUES (?,?,?,?,?,?)",
+                (child_id, blood_group, blood_rh, policy_number, policy_company, snils)
+            )
+    conn.commit()
+    conn.close()
+
+
+# ── Аллергии ─────────────────────────────────────────────────────────────────
+
+def add_allergy(child_id, name, reaction="", severity="mild"):
+    conn = get_conn()
+    c = conn.cursor()
+    if _is_pg():
+        c.execute(
+            "INSERT INTO allergies (child_id, name, reaction, severity) VALUES (%s,%s,%s,%s)",
+            (child_id, name, reaction, severity)
+        )
+    else:
+        c.execute(
+            "INSERT INTO allergies (child_id, name, reaction, severity) VALUES (?,?,?,?)",
+            (child_id, name, reaction, severity)
+        )
     conn.commit()
     conn.close()
 
@@ -599,7 +882,7 @@ def add_allergy(child_id, name, reaction, severity):
 def get_allergies(child_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("SELECT * FROM allergies WHERE child_id=? ORDER BY id"), (child_id,))
+    c.execute(_q("SELECT * FROM allergies WHERE child_id=? ORDER BY severity DESC"), (child_id,))
     rows = _fetchall(c)
     conn.close()
     return rows
@@ -617,10 +900,15 @@ def delete_allergy(allergy_id):
     return child_id
 
 
+# ── Противопоказания ──────────────────────────────────────────────────────────
+
 def add_contraindication(child_id, name):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("INSERT INTO contraindications (child_id, name) VALUES (?,?)"), (child_id, name))
+    if _is_pg():
+        c.execute("INSERT INTO contraindications (child_id, name) VALUES (%s,%s)", (child_id, name))
+    else:
+        c.execute("INSERT INTO contraindications (child_id, name) VALUES (?,?)", (child_id, name))
     conn.commit()
     conn.close()
 
@@ -628,7 +916,7 @@ def add_contraindication(child_id, name):
 def get_contraindications(child_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("SELECT * FROM contraindications WHERE child_id=? ORDER BY id"), (child_id,))
+    c.execute(_q("SELECT * FROM contraindications WHERE child_id=? ORDER BY created_at"), (child_id,))
     rows = _fetchall(c)
     conn.close()
     return rows
@@ -646,117 +934,89 @@ def delete_contraindication(contra_id):
     return child_id
 
 
-# ── Семейный доступ ─────────────────────────────────────────────────────────
-
-def add_family_member(owner_id, member_id):
-    conn = get_conn()
-    c = conn.cursor()
-    try:
-        if _is_pg():
-            c.execute("INSERT INTO family_access (owner_user_id, member_user_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (owner_id, member_id))
-        else:
-            c.execute("INSERT OR IGNORE INTO family_access (owner_user_id, member_user_id) VALUES (?,?)", (owner_id, member_id))
-        conn.commit()
-        success = True
-    except Exception:
-        success = False
-    conn.close()
-    return success
-
-
-def get_family_members(owner_id):
-    conn = get_conn()
-    c = conn.cursor()
-    sql = "SELECT f.member_user_id, u.first_name, u.username FROM family_access f LEFT JOIN users u ON f.member_user_id=u.user_id WHERE f.owner_user_id=?"
-    c.execute(_q(sql), (owner_id,))
-    rows = _fetchall(c)
-    conn.close()
-    return rows
-
-
-def remove_family_member(owner_id, member_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(_q("DELETE FROM family_access WHERE owner_user_id=? AND member_user_id=?"), (owner_id, member_id))
-    conn.commit()
-    conn.close()
-
-
-def get_family_user_ids(user_id):
-    """Возвращает список всех ID (самого пользователя + членов его семьи)."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(_q("SELECT member_user_id FROM family_access WHERE owner_user_id=?"), (user_id,))
-    rows = _fetchall(c)
-    
-    c.execute(_q("SELECT owner_user_id FROM family_access WHERE member_user_id=?"), (user_id,))
-    rows2 = _fetchall(c)
-    conn.close()
-
-    res = {user_id}
-    for r in rows: res.add(r["member_user_id"])
-    for r in rows2: res.add(r["owner_user_id"])
-    return list(res)
-
-
-# ── Рефералы ────────────────────────────────────────────────────────────────
+# ── Реферальная система ───────────────────────────────────────────────────────
 
 def get_referral_code(user_id):
+    """Реферальный код = просто ID пользователя."""
     return str(user_id)
 
 
-def apply_referral(referred_id, referrer_id):
-    if referred_id == referrer_id:
+def apply_referral(referred_user_id, referrer_user_id):
+    """Записывает реферала. Возвращает True если успешно."""
+    if referred_user_id == referrer_user_id:
         return False
     conn = get_conn()
     c = conn.cursor()
-    try:
-        if _is_pg():
-            c.execute("INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (referrer_id, referred_id))
-        else:
-            c.execute("INSERT OR IGNORE INTO referrals (referrer_user_id, referred_user_id) VALUES (?,?)", (referrer_id, referred_id))
-        conn.commit()
-        success = True
-    except Exception:
-        success = False
+    # Проверяем что пользователь ещё не был приглашён
+    c.execute(_q("SELECT id FROM referrals WHERE referred_user_id=?"), (referred_user_id,))
+    if _fetchone(c):
+        conn.close()
+        return False
+    if _is_pg():
+        c.execute(
+            "INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+            (referrer_user_id, referred_user_id)
+        )
+    else:
+        c.execute(
+            "INSERT OR IGNORE INTO referrals (referrer_user_id, referred_user_id) VALUES (?,?)",
+            (referrer_user_id, referred_user_id)
+        )
+    conn.commit()
     conn.close()
-    return success
+    return True
 
 
-def give_referral_bonus(referrer_id, days):
+def give_referral_bonus(referrer_user_id, bonus_days=7):
+    """Даёт бонус пригласившему."""
+    from datetime import datetime, timedelta
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("SELECT premium_until FROM users WHERE user_id=?"), (referrer_id,))
+    c.execute(_q("SELECT premium_until, is_premium FROM users WHERE user_id=?"), (referrer_user_id,))
     row = _fetchone(c)
     if not row:
         conn.close()
-        return None
+        return
 
     now = datetime.now()
-    current_until = None
-    if row["premium_until"]:
+    if row["is_premium"] and row["premium_until"]:
         try:
-            current_until = datetime.fromisoformat(row["premium_until"])
+            base = datetime.fromisoformat(row["premium_until"])
+            if base < now:
+                base = now
         except Exception:
-            pass
+            base = now
+    else:
+        base = now
 
-    base_date = current_until if (current_until and current_until > now) else now
-    new_until = (base_date + timedelta(days=days)).isoformat()
-
-    c.execute(_q("UPDATE users SET premium_until=? WHERE user_id=?"), (new_until, referrer_id))
-    c.execute(_q("UPDATE referrals SET bonus_given=1 WHERE referrer_user_id=? AND bonus_given=0"), (referrer_id,))
+    until = (base + timedelta(days=bonus_days)).isoformat()
+    if _is_pg():
+        c.execute(
+            "UPDATE users SET is_premium=1, premium_until=%s WHERE user_id=%s",
+            (until, referrer_user_id)
+        )
+    else:
+        c.execute(
+            "UPDATE users SET is_premium=1, premium_until=? WHERE user_id=?",
+            (until, referrer_user_id)
+        )
+    # Отмечаем что бонус выдан
+    c.execute(
+        _q("UPDATE referrals SET bonus_given=1 WHERE referrer_user_id=? AND bonus_given=0"),
+        (referrer_user_id,)
+    )
     conn.commit()
     conn.close()
-    return new_until
+    return until
 
 
 def get_referral_stats(user_id):
+    """Статистика рефералов пользователя."""
     conn = get_conn()
     c = conn.cursor()
     c.execute(_q("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_user_id=?"), (user_id,))
-    row1 = _fetchone(c)
-    total = row1["cnt"] if row1 else 0
-
+    row = _fetchone(c)
+    total = row["cnt"] if row else 0
     c.execute(_q("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_user_id=? AND bonus_given=1"), (user_id,))
     row2 = _fetchone(c)
     bonused = row2["cnt"] if row2 else 0
@@ -792,34 +1052,13 @@ def get_checkups_done(child_id):
     c.execute(_q("SELECT checkup_months FROM checkups_done WHERE child_id=?"), (child_id,))
     rows = _fetchall(c)
     conn.close()
-    return set(r["checkup_months"] for r in rows)
-# ── Дополнительные функции для интеграции с PDF-экспортом ──────────────────────
+    return {r["checkup_months"] for r in rows}
 
-def get_medical_info(child_id):
-    """Возвращает общую мед. информацию (группа крови, резус, полис)"""
+
+def unmark_checkup_done(child_id, checkup_months):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(_q("SELECT * FROM medical_info WHERE child_id=?"), (child_id,))
-    row = _fetchone(c)
+    c.execute(_q("DELETE FROM checkups_done WHERE child_id=? AND checkup_months=?"),
+              (child_id, checkup_months))
+    conn.commit()
     conn.close()
-    return row if row else {}
-
-
-def get_allergies(child_id):
-    """Возвращает список аллергий ребёнка"""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(_q("SELECT * FROM allergies WHERE child_id=?"), (child_id,))
-    rows = _fetchall(c)
-    conn.close()
-    return rows if rows else []
-
-
-def get_contraindications(child_id):
-    """Возвращает список противопоказаний ребёнка"""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(_q("SELECT * FROM contraindications WHERE child_id=?"), (child_id,))
-    rows = _fetchall(c)
-    conn.close()
-    return rows if rows else []
