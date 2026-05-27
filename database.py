@@ -1,7 +1,6 @@
 import os
 import psycopg2
 import psycopg2.extras
-import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -257,78 +256,6 @@ def init_db():
             except Exception:
                 pass
 
-
-    c.execute(f"""
-        CREATE TABLE IF NOT EXISTS medical_info (
-            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
-            child_id INTEGER NOT NULL UNIQUE,
-            blood_group TEXT,
-            blood_rh TEXT,
-            policy_number TEXT,
-            policy_company TEXT,
-            snils TEXT,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    c.execute(f"""
-        CREATE TABLE IF NOT EXISTS allergies (
-            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
-            child_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            reaction TEXT,
-            severity TEXT DEFAULT 'mild',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    c.execute(f"""
-        CREATE TABLE IF NOT EXISTS contraindications (
-            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
-            child_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-
-    c.execute(f"""
-        CREATE TABLE IF NOT EXISTS checkups_done (
-            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
-            child_id INTEGER NOT NULL,
-            checkup_months INTEGER NOT NULL,
-            done_date TEXT NOT NULL,
-            UNIQUE(child_id, checkup_months)
-        )
-    """)
-
-    c.execute(f"""
-        CREATE TABLE IF NOT EXISTS pregnancy (
-            user_id BIGINT PRIMARY KEY,
-            pdr TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    c.execute(f"""
-        CREATE TABLE IF NOT EXISTS referrals (
-            id {'SERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'},
-            referrer_user_id BIGINT NOT NULL,
-            referred_user_id BIGINT NOT NULL UNIQUE,
-            bonus_given INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    if not pg:
-        for migration in [
-            "ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN referred_by BIGINT",
-        ]:
-            try:
-                c.execute(migration)
-            except Exception:
-                pass
 
     conn.commit()
     conn.close()
