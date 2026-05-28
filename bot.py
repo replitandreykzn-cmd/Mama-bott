@@ -178,10 +178,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💡 Есть раздел *🤰 Беременность* — если ждёте малыша, загляните туда!\n\n"
             f"Выберите раздел в меню ниже 👇"
         )
-        await update.message.reply_text(
-            welcome, parse_mode="Markdown",
-            reply_markup=main_reply_keyboard(1)
-        )
+        # Отправляем баннер с приветствием в подписи
+        import os as _os
+        banner_path = _os.path.join(_os.path.dirname(__file__), "assets", "banner.png")
+        try:
+            with open(banner_path, "rb") as _img:
+                await update.message.reply_photo(
+                    photo=_img,
+                    caption=welcome,
+                    parse_mode="Markdown",
+                    reply_markup=main_reply_keyboard(1)
+                )
+        except Exception:
+            # Если картинка не найдена — отправляем просто текст
+            await update.message.reply_text(
+                welcome, parse_mode="Markdown",
+                reply_markup=main_reply_keyboard(1)
+            )
         # Запускаем онбординг для новых пользователей
         await start_onboarding(update, context)
     else:
