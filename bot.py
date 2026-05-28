@@ -429,6 +429,40 @@ async def send_weekly_vaccine_reminders(app: Application):
 
 # ── Точка входа ──────────────────────────────────────────────────────────────
 
+
+async def cmd_testart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тест приветственного баннера — только для владельца бота."""
+    owner_id = int(os.environ.get("OWNER_TG_ID", "0"))
+    if update.effective_user.id != owner_id:
+        await update.message.reply_text("⛔ Команда только для администратора.")
+        return
+    name = update.effective_user.first_name or "Мамочка"
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+    until_str = (date.today() + relativedelta(days=14)).strftime("%d.%m.%Y")
+    welcome = (
+        f"Привет, {name}! 🌸\n\n"
+        f"Добро пожаловать в *МамаБот* — помощник для мам!\n\n"
+        f"🎁 *Активирован бесплатный период на {TRIAL_DAYS} дней* (до {until_str}).\n\n"
+        f"💡 Есть раздел *🤰 Беременность* — если ждёте малыша, загляните туда!\n\n"
+        f"Выберите раздел в меню ниже 👇"
+    )
+    banner_path = os.path.join(os.path.dirname(__file__), "assets", "banner.png")
+    try:
+        with open(banner_path, "rb") as _img:
+            await update.message.reply_photo(
+                photo=_img,
+                caption=welcome,
+                parse_mode="Markdown",
+                reply_markup=main_reply_keyboard(1)
+            )
+    except Exception as e:
+        await update.message.reply_text(
+            f"⚠️ Баннер не найден: {e}\n\nТекст приветствия:\n\n" + welcome,
+            parse_mode="Markdown",
+            reply_markup=main_reply_keyboard(1)
+        )
+
 def main():
     db.init_db()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -568,6 +602,7 @@ def main():
 
     # ── Команды ──────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",     start))
+    app.add_handler(CommandHandler("testart",   cmd_testart))
     app.add_handler(CommandHandler("id",        cmd_id))
     app.add_handler(CommandHandler("grant",     cmd_grant))
     app.add_handler(CommandHandler("revoke",    cmd_revoke))
