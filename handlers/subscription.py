@@ -45,11 +45,13 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
             "• Все прививки и напоминания\n"
             "• PDF-экспорт карты ребёнка\n"
             "• Семейный доступ (до 5 чел.)\n"
-            "• Еженедельные напоминания о прививках"
+            "• Еженедельные напоминания о прививках\n\n"
+            "💬 Если есть вопросы — напишите администратору:"
         )
         keyboard = [
             [InlineKeyboardButton("👨‍👩‍👧 Управление семьёй", callback_data="family_menu")],
             [InlineKeyboardButton("🎁 Пригласить подругу", callback_data="referral")],
+            [InlineKeyboardButton("💬 Написать администратору", url=f"https://t.me/{OWNER_USERNAME}")],
         ]
     else:
         trial_used = user["trial_used"] if user else False
